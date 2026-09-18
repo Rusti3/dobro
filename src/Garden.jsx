@@ -1,0 +1,53 @@
+import React, { useState } from 'react';
+import { ArrowRight, Droplets, Sun, Sprout, X, Lock, Flower2 } from 'lucide-react';
+import { gardenFor, species } from './garden-model.js';
+import './garden.css';
+
+export function GardenPlant({ kind = 'oak', seed = false, dormant = false }) {
+  return <svg viewBox="0 0 140 160" fill="none" aria-hidden="true">
+    <ellipse cx="70" cy="143" rx="44" ry="10" fill="#365b3b" opacity=".12" />
+    {dormant ? <><ellipse cx="70" cy="139" rx="26" ry="7" fill="#a58b65"/><path d="M65 134Q56 117 71 113Q86 128 65 134Z" fill="#8b6749"/><path d="M67 132L71 120" stroke="#c2a077" strokeWidth="2"/></> : seed ? <><path d="M70 139V109" stroke="#48634b" strokeWidth="5" strokeLinecap="round"/><path d="M70 123C42 126 40 102 45 99C60 97 71 108 70 123Z" fill="#8ca66d"/><path d="M70 113C70 92 92 90 99 94C100 108 84 117 70 113Z" fill="#507751"/></> : kind === 'flowers' ? <>
+      {[[-25,15],[0,-7],[27,9]].map(([x,y],i)=><g key={i} transform={`translate(${x} ${y})`}><path d="M70 128V77M70 108Q46 109 48 94Q64 91 70 108" stroke="#5c8257" strokeWidth="4" fill="#83a06d"/>{[0,72,144,216,288].map(a=><ellipse key={a} cx="70" cy="57" rx="10" ry="17" fill={i===1?'#d8987c':'#e9ba8b'} transform={`rotate(${a} 70 73)`}/>)}<circle cx="70" cy="73" r="9" fill="#f2d392"/></g>)}
+    </> : kind === 'house' ? <><path d="M34 140V88L70 62L106 88V140Z" fill="#e7c3a0"/><path d="M25 92L70 54L115 92" stroke="#8a6d51" strokeWidth="9" strokeLinejoin="round"/><path d="M60 141V112H81V141" fill="#6e865b"/><rect x="45" y="95" width="12" height="12" rx="2" fill="#f7e7b4"/></> : kind === 'bush' ? <><ellipse cx="48" cy="118" rx="28" ry="24" fill="#719263"/><ellipse cx="91" cy="117" rx="29" ry="26" fill="#608456"/><ellipse cx="70" cy="99" rx="26" ry="31" fill="#8ba974"/><path d="M70 140V102M70 126L46 115M70 120L89 104" stroke="#476d49" strokeWidth="3"/></> : <>
+      <path d="M65 144L67 63H76L79 144Z" fill="#947454"/><path d="M70 115L46 91M73 104L98 79" stroke="#947454" strokeWidth="6" strokeLinecap="round"/>
+      <path d="M70 20C48 15 34 32 35 45C12 48 15 77 26 84C13 109 44 125 62 113C75 132 96 115 99 106C128 108 131 78 112 65C126 46 102 28 90 34C89 24 79 19 70 20Z" fill={kind==='maple'?'#bd685e':kind==='knowledge'?'#69958c':kind==='apple'?'#8d9f64':'#587c55'}/>
+      <path d="M34 68C35 45 52 37 64 40M51 91C62 91 76 84 80 67" stroke={kind==='maple'?'#d89677':'#acc18a'} strokeWidth="3" strokeLinecap="round" opacity=".65"/>
+      {kind==='apple'&&[[42,75],[88,53],[95,92],[66,105]].map(([x,y])=><circle key={x} cx={x} cy={y} r="6" fill="#cf8167"/>)}
+      {kind==='knowledge'&&<path d="M49 72Q60 65 70 73Q80 65 91 72V91Q80 84 70 92Q60 84 49 91ZM70 73V92" fill="#ecdfb9" stroke="#4d7466" strokeWidth="2"/>}
+    </>}
+  </svg>;
+}
+
+const date = value => value ? new Date(value).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}) : 'Дата не указана';
+const demoPlans = Object.keys(species).slice(0,6).map((category,i)=>({id:`preview-${i}`,owner:'preview',eventId:`preview-${i}`,status:'done',confirmed:true,when:`2026-09-${10+i}T10:00:00Z`,completedAt:`2026-09-${10+i}T12:00:00Z`,hours:i%2+1,event:{gardenCategory:category,short:['Помощь приюту','Творческая встреча','Визит в пансионат','Уборка берега','Урок с детьми','День донора'][i]}}));
+
+export default function Garden({data,go}) {
+  const [preview,setPreview] = useState(false);
+  const [selected,setSelected] = useState(null);
+  const [page,setPage] = useState(0);
+  const garden = gardenFor(preview?demoPlans:data.plans,preview?'preview':data.user.id);
+  const plots = garden.objects.length ? garden.objects : [{id:'seed',species:'animals',seed:true}];
+  const pages = Math.ceil(plots.length/9);
+  const current = Math.min(page,pages-1);
+  const pick = selected && plots.find(o=>o.id===selected);
+  return <div className="garden-page">
+    <div className="garden-heading"><div><span className="eyebrow">КАЖДОЕ ДЕЛО ОСТАВЛЯЕТ СЛЕД</span><h1>Сад добрых дел</h1><p>Твоя помощь становится чем-то живым.</p></div><button className="secondary" onClick={()=>go('discover')}>Найти дело <ArrowRight size={17}/></button></div>
+    <div className="garden-toolbar"><div className="garden-wallet"><span title="Всего заработано воды"><Droplets size={18}/><b>{garden.water}</b> воды</span><span title="Всего заработано солнца"><Sun size={18}/><b>{garden.sunlight}</b> солнца</span></div><button className="text-button" onClick={()=>{setPreview(!preview);setSelected(null);setPage(0);}}>{preview?'Вернуться в мой сад':'Посмотреть пример сада'}</button></div>
+    <section className={`garden-land ${preview?'is-preview':''}`} aria-label={preview?'Пример выросшего сада':'Мой участок'}>
+      <div className="land-caption"><span>{preview?'Пример · вымышленные дела':'Твой постоянный участок'}</span><span>{garden.objects.length ? `${garden.objects.length} растений`:'Всё начинается с семечка'}</span></div>
+      <svg fill="none" className="land-background" viewBox="0 0 900 460" preserveAspectRatio="none" aria-hidden="true"><path d="M0 150Q170 60 350 140T900 95V460H0Z" fill="#e0e7c8"/><path d="M0 280Q300 160 500 240T900 210V460H0Z" fill="#d3deba"/><path d="M550 460Q630 335 452 305T380 170" stroke="#eae4c9" strokeWidth="37" strokeLinecap="round"/><path d="M0 415Q130 375 235 413T550 425T900 380V460H0Z" fill="#becda4"/>{[80,205,710,790,310,620].map((x,i)=><path key={x} d={`M${x} ${370-i%3*70}l-4 -8m4 8l5 -11`} stroke="#9bb087" strokeWidth="2" strokeLinecap="round"/>)}<ellipse cx="750" cy="352" rx="17" ry="7" fill="#b3bca2"/><ellipse cx="145" cy="322" rx="11" ry="5" fill="#b3bca2"/></svg>
+      <div className={`garden-plots ${garden.objects.length?'':'empty-plot'}`}>
+        {plots.slice(current*9,current*9+9).map((o,i)=><button key={o.id} className={`garden-object ${selected===o.id?'selected':''}`} style={{'--delay':`${i*45}ms`}} aria-label={o.seed?'Семечко: как вырастить первое растение':`${species[o.species].name}: ${o.plan.event.short}`} aria-pressed={selected===o.id} onClick={()=>setSelected(selected===o.id?null:o.id)}><GardenPlant kind={species[o.species].kind} seed={o.seed} dormant={o.seed && !garden.seedlings.some(p=>p.confirmed)}/><span>{o.seed?(garden.seedlings.some(p=>p.confirmed)?'Визит согласован':'Твоё первое растение'):species[o.species].name}</span></button>)}
+      </div>
+      {garden.bench&&<div className="garden-bench" title="Скамейка за пять визитов" aria-label="Скамейка за пять визитов"><svg viewBox="0 0 100 70" aria-hidden="true"><path d="M17 45V63M81 45V63" stroke="#737d57" strokeWidth="5"/><path d="M10 20H89M10 30H89M6 44H94" stroke="#b59365" strokeWidth="9" strokeLinecap="round"/></svg></div>}
+      {garden.pond&&<div className="garden-pond" aria-label="Пруд за десять визитов"/>}
+      {garden.rare&&<div className="garden-rare" title="Редкий цветок за три визита" aria-label="Редкий цветок за три визита"><GardenPlant kind="flowers"/></div>}
+      <div className="land-bottom"><span><Sprout size={15}/> Уровень {garden.level} · {garden.completed.length} завершённых дел</span>{pages>1&&<div><button disabled={current===0} onClick={()=>{setPage(current-1);setSelected(null);}}>←</button> {current+1} / {pages} <button disabled={current===pages-1} onClick={()=>{setPage(current+1);setSelected(null);}}>→</button></div>}</div>
+    </section>
+    {pick&&<section className="plant-story" aria-live="polite"><GardenPlant kind={species[pick.species].kind} seed={pick.seed} dormant={pick.seed && !garden.seedlings.some(p=>p.confirmed)}/><div><span className="eyebrow">{pick.seed?'ПЕРВАЯ ГЛАВА':'ИСТОРИЯ РАСТЕНИЯ'}</span><h2>{pick.seed?'Здесь вырастет твой первый результат':species[pick.species].name}</h2>{pick.seed?<p>Выбери дело, договорись о визите и после участия сохрани впечатление. Сразу появится полноценное растение.</p>:<><p>{pick.plan.event.short}</p><p className="muted">Посажено {date(pick.plan.completedAt)} · {pick.plan.hours || 0} ч помощи</p><span className="pill">{preview?'Пример истории':'Участие и часы отмечены мной'}</span></>}</div><button className="text-button" aria-label="Закрыть историю" onClick={()=>setSelected(null)}><X size={19}/></button></section>}
+    {!preview&&<div className="garden-next"><div><span className="eyebrow">СЛЕДУЮЩИЙ ШАГ</span><h2>{garden.seedlings.length?'У твоего ростка уже есть план':garden.completed.length?'Для новой истории есть место':'Первое дело — первое большое растение'}</h2><p>{garden.seedlings.length?'Открой план: свяжись с организатором и подготовься к визиту.':'После участия получишь 100 воды и растение, которое останется в саду.'}</p></div><button className="primary" onClick={()=>go(garden.seedlings.length?'plan':'discover')}>{garden.seedlings.length?'Открыть мой план':'Выбрать доброе дело'}<ArrowRight size={18}/></button></div>}
+    <div className="garden-journal"><div><h2>Что уже растёт</h2><p className="muted">{garden.completed.length} дел · {garden.hours} ч помощи{preview?' · пример':' · по твоим отметкам'}</p></div><div className="garden-collection">{Object.entries(species).map(([key,s])=>{const count=garden.objects.filter(o=>o.species===key).length;return <div key={key} className={count?'collected':'uncollected'}><GardenPlant kind={s.kind}/><strong>{s.label}</strong><span>{count?`${count} в саду`:'Ещё впереди'}</span></div>;})}</div></div>
+    <div className="garden-milestones"><h2>Маленькие открытия</h2><div>{[[garden.rare,'Редкий цветок','3 визита, в любом темпе'],[garden.bench,'Скамейка в саду','5 завершённых дел'],[garden.pond,'Тихий пруд','10 завершённых дел']].map(([unlocked,title,rule])=><div key={title}>{unlocked?<Flower2 size={21}/>:<Lock size={19}/>}<span><strong>{title}</strong><small>{unlocked?'Открыто · ':''}{rule}</small></span></div>)}</div>{garden.rare&&<p className="rare-flower">✿ Редкий цветок открыт — он стал частью твоей коллекции.</p>}</div>
+    <details className="garden-rules"><summary>Как растёт сад и откуда берутся награды</summary><p>Вода и солнце показывают весь твой вклад. Тратить их на обязательный полив не нужно: растения появляются за дела и остаются навсегда.</p><ul><li>Сохранил дело в план — 10 воды, один раз на мероприятие.</li><li>Отметил согласование визита — ещё 20 воды, один раз на мероприятие.</li><li>После визита сохранил впечатление — 100 воды и полноценное растение. Один визит на одно событие и время учитывается один раз.</li><li>Указал время помощи — 50 солнца за час, до 24 часов за визит.</li><li>Просмотры и ежедневные входы ничего не начисляют. За паузы и отмену нет штрафа.</li></ul><p>Сейчас участие отмечаешь ты сам. Это личная история, не подтверждённые волонтёрские часы. Награды за приход друга, общее дело и организацию события появятся после подключения подтверждений организатора.</p></details>
+  </div>;
+}

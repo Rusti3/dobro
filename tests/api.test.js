@@ -25,7 +25,11 @@ test('Two-user invitation, ownership, persistence, revocation and deletion',asyn
  await b('/me','DELETE',{});assert.equal((await a('/bootstrap')).data.plans[0].members.length,0);
  // Advance a fixture into the past to exercise completion without bypassing the public API.
  const fixture=createStore(db);const p=fixture.plan(id);p.when=new Date(Date.now()-60000).toISOString();p.confirmed=true;p.status='ready';fixture.savePlan(p);fixture.db.close();
- assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm'})).data.status,'done');
+ assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm',hours:25})).status,400);
+ const finished=await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm',hours:2.5});
+ assert.equal(finished.data.status,'done');assert.equal(finished.data.hours,2.5);
+ child.kill();await new Promise(r=>child.once('exit',r));start();await wait();
+ assert.equal((await a('/bootstrap')).data.plans[0].hours,2.5);
  assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm'})).status,400);
  await a('/me','DELETE',{});assert.equal((await a('/bootstrap')).data.plans.length,0);
 });
