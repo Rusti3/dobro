@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  createHmac,
   randomBytes,
   randomUUID,
-  timingSafeEqual,
 } from "node:crypto";
-import { botReply } from "../server/domain.js";
+import { botReply, telegramUser } from "../server/domain.js";
 import { validateHours } from '../server/garden.js';
+import { webhookSecret } from '../server/telegram-config.js';
 
 const catalog = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "data/catalog.json"), "utf8"),
@@ -29,6 +28,11 @@ const fail = (message, status = 400) => {
   throw e;
 };
 const readBody = async (req) => {
+  // Vercel can parse JSON before invoking the handler.
+  if (req.body !== undefined) {
+    if (typeof req.body === 'object' && req.body !== null && !Buffer.isBuffer(req.body)) return req.body;
+    try { return JSON.parse(String(req.body)); } catch { fail('Некорректный JSON.'); }
+  }
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
@@ -48,24 +52,9 @@ function parseCookie(req, name) {
   );
 }
 function verifyInit(raw, token) {
-  const q = new URLSearchParams(raw),
-    hash = q.get("hash");
-  q.delete("hash");
-  if (!token || !hash || !/^[a-f0-9]{64}$/.test(hash))
-    fail("Откройте приложение заново из Telegram.", 401);
-  const age = Date.now() / 1000 - Number(q.get("auth_date"));
-  if (!Number.isFinite(age) || age < -30 || age > 3600)
-    fail("Сессия истекла. Откройте приложение заново.", 401);
-  const data = [...q.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-  const key = createHmac("sha256", "WebAppData").update(token).digest();
-  const expected = createHmac("sha256", key).update(data).digest();
-  if (!timingSafeEqual(expected, Buffer.from(hash, "hex")))
-    fail("Не удалось подтвердить Telegram-сессию.", 401);
-  const u = JSON.parse(q.get("user") || "{}");
-  if (!Number.isSafeInteger(u.id)) fail("Нет пользователя Telegram.", 401);
+  if (!token?.trim()) fail('На сервере не настроен TELEGRAM_BOT_TOKEN. Добавьте его в Vercel и выполните Redeploy.', 503);
+  let u;
+  try { u = telegramUser(raw, token.trim()); } catch(e) { fail(e.message,401); }
   return { id: `tg:${u.id}`, name: u.first_name || "Друг", chatId: u.id };
 }
 function user(req, res) {
@@ -89,8 +78,16 @@ function user(req, res) {
       reminders: false,
     };
   } else fail("Откройте приложение из Telegram.", 401);
-  if (!memory.users.has(u.id)) memory.users.set(u.id, u);
-  return memory.users.get(u.id);
+  const existing = memory.users.get(u.id);
+  const complete = {
+    profile: {city:'Москва',category:'all',barrier:'company'},
+    reminders:false,
+    createdAt:new Date().toISOString(),
+    ...existing,
+    ...u,
+  };
+  memory.users.set(u.id, complete);
+  return complete;
 }
 function event(id) {
   return catalog.find((e) => e.id === id);
@@ -131,19 +128,24 @@ function plansFor(u) {
     .map((p) => safePlan(p, u));
 }
 async function telegram(method, data) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) fail('На сервере не настроен TELEGRAM_BOT_TOKEN.',503);
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
+    signal: AbortSignal.timeout(10000),
   });
+  const result = await response.json();
+  if(!result.ok) fail(`Telegram не принял ответ бота (код ${result.error_code}). Проверьте токен и MINI_APP_URL.`,502);
 }
 async function webhook(req, res) {
   if (req.method !== "POST")
     return json(res, 405, { error: "Метод не поддерживается." });
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (secret && req.headers["x-telegram-bot-api-secret-token"] !== secret)
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if(!token) fail('На сервере не настроен TELEGRAM_BOT_TOKEN.',503);
+  const secret = webhookSecret(token, process.env.TELEGRAM_WEBHOOK_SECRET);
+  if (req.headers["x-telegram-bot-api-secret-token"] !== secret)
     return json(res, 403, { error: "Forbidden" });
   const update = await readBody(req);
   const m = update.message;
@@ -161,7 +163,8 @@ async function webhook(req, res) {
     const text = m.text || "";
     const cmd = text.split(/[ @]/)[0];
     let reply = botReply(text, u.name),
-      url = process.env.MINI_APP_URL || "";
+      url = process.env.MINI_APP_URL?.trim().replace(/\/+$/, '') || "";
+    if(!url.startsWith('https://')) fail('Настройте HTTPS MINI_APP_URL в Vercel.',503);
     if (cmd === "/plan") {
       const p = plansFor(u).find(
         (p) => !["cancelled", "done"].includes(p.status),
@@ -209,7 +212,7 @@ export default async function handler(req, res) {
   try {
     const pathname = new URL(req.url, `https://${req.headers.host || "vercel"}`)
       .pathname;
-    if (pathname === "/api/telegram") return webhook(req, res);
+    if (pathname === "/api/telegram") return await webhook(req, res);
     if (pathname === "/api/health")
       return json(res, 200, {
         ok: true,
