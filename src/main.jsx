@@ -131,7 +131,7 @@ function App() {
   const [data, setData] = useState(null),
     [fatal, setFatal] = useState(""),
     [tab, setTab] = useState(
-      new URLSearchParams(location.search).get("tab") || "garden",
+      new URLSearchParams(location.search).get("tab") || "home",
     ),
     [detail, setDetail] = useState(null),
     [onboard, setOnboard] = useState(false),
@@ -279,8 +279,9 @@ function App() {
     (a, b) => Number(b.id === "11597695") - Number(a.id === "11597695"),
   );
   const nav = [
-    ["garden", Flower2, "Мой сад"],
+    ["home", Sprout, "Первый шаг"],
     ["discover", Compass, "Добрые дела"],
+    ["garden", Flower2, "Мой сад"],
     ["together", Users, "Вместе"],
     ["plan", CalendarDays, "Мой план"],
   ];
@@ -1258,7 +1259,7 @@ function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <button className="brand" onClick={() => go("garden")}>
+        <button className="brand" onClick={() => go("home")}>
           <span className="brand-icon">
             <Sprout size={25} />
           </span>

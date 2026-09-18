@@ -10,7 +10,7 @@ await telegramCall(token,'setWebhook',{
   secret_token:webhookSecret(token,process.env.TELEGRAM_WEBHOOK_SECRET),
   allowed_updates:['message'],drop_pending_updates:false,
 });
-await telegramCall(token,'setChatMenuButton',{menu_button:{type:'web_app',text:'Сад добрых дел',web_app:{url}}});
+await telegramCall(token,'setChatMenuButton',{menu_button:{type:'web_app',text:'Добро',web_app:{url}}});
 await telegramCall(token,'setMyCommands',{commands:[
   {command:'start',description:'Открыть приложение'},
   {command:'garden',description:'Сад добрых дел'},
