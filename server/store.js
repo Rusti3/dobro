@@ -1,0 +1,9 @@
+import {DatabaseSync} from 'node:sqlite';
+import fs from 'node:fs';
+import path from 'node:path';
+export function createStore(filename) {
+ fs.mkdirSync(path.dirname(filename),{recursive:true});
+ const db=new DatabaseSync(filename); db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, owner TEXT NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS invites (token TEXT PRIMARY KEY, plan TEXT NOT NULL, expires INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);');
+ const parse=r=>r?JSON.parse(r.data):null;
+ return {db,user:id=>parse(db.prepare('SELECT data FROM users WHERE id=?').get(id)),saveUser:u=>db.prepare('INSERT OR REPLACE INTO users VALUES (?,?)').run(u.id,JSON.stringify(u)),plan:id=>parse(db.prepare('SELECT data FROM plans WHERE id=?').get(id)),savePlan:p=>db.prepare('INSERT OR REPLACE INTO plans VALUES (?,?,?)').run(p.id,p.owner,JSON.stringify(p)),plans:()=>db.prepare('SELECT data FROM plans').all().map(parse),users:()=>db.prepare('SELECT data FROM users').all().map(parse),invite:t=>db.prepare('SELECT * FROM invites WHERE token=?').get(t),saveInvite:(t,p,e)=>db.prepare('INSERT INTO invites VALUES (?,?,?)').run(t,p,e),revoke:p=>db.prepare('DELETE FROM invites WHERE plan=?').run(p),meta:k=>db.prepare('SELECT value FROM meta WHERE key=?').get(k)?.value,setMeta:(k,v)=>db.prepare('INSERT OR REPLACE INTO meta VALUES (?,?)').run(k,String(v)),deleteUser:id=>{db.prepare('DELETE FROM users WHERE id=?').run(id); for(const p of db.prepare('SELECT data FROM plans').all().map(parse)){if(p.owner===id){db.prepare('DELETE FROM invites WHERE plan=?').run(p.id);db.prepare('DELETE FROM plans WHERE id=?').run(p.id);}else if(p.members.some(m=>m.id===id)){p.members=p.members.filter(m=>m.id!==id);db.prepare('UPDATE plans SET data=? WHERE id=?').run(JSON.stringify(p),p.id);}}}};
+}

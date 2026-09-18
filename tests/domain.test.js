@@ -1,0 +1,7 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHmac} from 'node:crypto';
+import {telegramUser,validatePlan,botReply} from '../server/domain.js';
+test('Telegram HMAC rejects tampering and expired sessions',()=>{const token='test-only-token',now=Date.now();const q=new URLSearchParams({auth_date:String(Math.floor(now/1000)),user:JSON.stringify({id:42,first_name:'Тест'})});const str=[...q.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k}=${v}`).join('\n');const key=createHmac('sha256','WebAppData').update(token).digest();q.set('hash',createHmac('sha256',key).update(str).digest('hex'));assert.equal(telegramUser(q.toString(),token,now).id,42);assert.throws(()=>telegramUser(q.toString(),token,now+3700000));q.set('user',JSON.stringify({id:43}));assert.throws(()=>telegramUser(q.toString(),token,now));});
+test('Unknown, expired and out-of-period visits rejected',()=>{const now=Date.parse('2026-09-16T12:00:00Z'),e={startsAt:'2026-01-01',endsAt:'2026-12-31'};assert.throws(()=>validatePlan({},null,now));assert.throws(()=>validatePlan({when:'bad'},e,now));assert.throws(()=>validatePlan({when:'2027-01-01'},e,now));assert.throws(()=>validatePlan({}, {...e,endsAt:'2026-09-01'},now));assert.equal(validatePlan({when:'2026-09-20T10:00:00Z',confirmed:true},e,now).confirmed,true);});
+test('Bot offers preparation and explicit opt-out',()=>{assert.match(botReply('/start'),/первого|Первый|первый|Начать|начать/);assert.match(botReply('/stop'),/отключены/);assert.match(botReply('/help'),/организатора/);});

@@ -1,0 +1,20 @@
+services:
+  first-step:
+    build: .
+    ports:
+      - "127.0.0.1:3210:3210"
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-true}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BOT_USERNAME: ${BOT_USERNAME:-}
+      MINI_APP_URL: ${MINI_APP_URL:-}
+    volumes:
+      - first-step-data:/app/var
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  first-step-data:
