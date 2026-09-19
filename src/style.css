@@ -25,3 +25,5 @@
 @media(max-height:650px){.swipe-only-shell .swipe-intro p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.swipe-only-shell .swipe-home-copy>p{-webkit-line-clamp:1}.swipe-only-shell .trait-row{display:none}.swipe-only-shell .swipe-home-copy .text-button{margin-top:3px}.swipe-only-shell .swipe-home-actions{padding-top:5px}}
 .swipe-only-shell .swipe-deck{touch-action:none}
 .mobile-nav button{position:relative}
+.interest-title{font-size:13px}.interest-copy p{font-size:13px}.interest-actions>span{font-size:13px}
+@media(max-width:600px){.interest-title{font-size:12px}.interest-copy p{font-size:11px}.interest-actions>span,.interest-actions .primary{font-size:11px}}
