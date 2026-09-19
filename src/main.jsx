@@ -65,6 +65,12 @@ const dateLabel = (d) =>
       }) + " · МСК"
     : "Дату согласуем с организатором";
 const live = (e) => Date.parse(e.endsAt) > Date.now();
+const moscowDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
+const swipeStorageKey = (userId) => `first-step:recommendations:${userId}:${moscowDay()}`;
+const eventInterest = (event) => event.gardenCategory || (event.id === "11521651" ? "elderly" : event.category);
+const stableNumber = (value) => [...String(value)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 7);
+const readDailySwipe = (userId) => { try { const value = Number(localStorage.getItem(swipeStorageKey(userId)) || 0); return Number.isFinite(value) ? value : 0; } catch { return 0; } };
+const writeDailySwipe = (userId, value) => { try { localStorage.setItem(swipeStorageKey(userId), String(value)); } catch {} };
 function Plant({ stage = 2, small = false }) {
   return (
     <svg
@@ -139,9 +145,10 @@ function Plant({ stage = 2, small = false }) {
 function App() {
   const [data, setData] = useState(null),
     [fatal, setFatal] = useState(""),
-    [tab, setTab] = useState(
-      new URLSearchParams(location.search).get("tab") || "home",
-    ),
+    [tab, setTab] = useState(() => {
+      const requested = new URLSearchParams(location.search).get("tab") || "home";
+      return requested === "discover" ? "home" : requested;
+    }),
     [detail, setDetail] = useState(null),
     [onboard, setOnboard] = useState(false),
     [step, setStep] = useState(0),
@@ -167,6 +174,7 @@ function App() {
       setData(d);
       setProfile(d.user.profile);
       setInterestSelection(d.user.profile.interests || []);
+      setSwipeIndex(readDailySwipe(d.user.id));
       if (!d.user.onboarded) setOnboard(true);
       setFatal("");
     } catch (e) {
@@ -202,6 +210,9 @@ function App() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [tab, detail, onboard, settings]);
+  useEffect(() => {
+    if (swipeIndex >= 3) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [swipeIndex]);
   async function act(fn) {
     if (busy) return;
     setBusy(true);
@@ -222,7 +233,12 @@ function App() {
     }
   }
   function go(t) {
-    setTab(t);
+    const nextTab = t === "discover" ? "home" : t;
+    if (t === "discover" && data) {
+      setSwipeIndex(3);
+      writeDailySwipe(data.user.id, 3);
+    }
+    setTab(nextTab);
     setDetail(null);
     setOnboard(false);
     setSettings(false);
@@ -285,23 +301,25 @@ function App() {
     (p) => !["cancelled", "done"].includes(p.status),
   );
   const done = data.plans.filter((p) => p.status === "done");
-  const chosen = data.catalog
-    .filter(live)
-    .filter(
-      (e) => profile.category === "all" || e.category === profile.category,
-    );
-  const recommended = [...chosen].sort(
-    (a, b) => Number(b.id === "11597695") - Number(a.id === "11597695"),
-  );
+  const chosen = data.catalog.filter(live);
+  const interests = profile.interests || [];
+  const dailySeed = stableNumber(`${data.user.id}:${moscowDay()}`);
+  const recommended = [...chosen].sort((a, b) => {
+    const relevance = Number(interests.includes(eventInterest(b))) - Number(interests.includes(eventInterest(a)));
+    return relevance || stableNumber(`${a.id}:${dailySeed}`) - stableNumber(`${b.id}:${dailySeed}`);
+  });
   const swipeItems = recommended.slice(0, 3);
   const swipeFinished = swipeIndex >= swipeItems.length;
   function swipeNext() {
-    setSwipeIndex((i) => i + 1);
+    setSwipeIndex((i) => {
+      const next = Math.min(i + 1, swipeItems.length);
+      writeDailySwipe(data.user.id, next);
+      return next;
+    });
     setSwipeDrag(0);
   }
   const nav = [
-    ["home", Sprout, "Первый шаг"],
-    ["discover", Compass, "Добрые дела"],
+    ["home", Compass, "Добрые дела"],
     ["garden", Flower2, "Мой сад"],
     ["together", Users, "Вместе"],
     ["plan", CalendarDays, "Мой план"],
@@ -346,6 +364,25 @@ function App() {
         </div>
       </button>
     );
+  }
+  function CatalogFeed() {
+    const events = data.catalog
+      .filter(live)
+      .filter(
+        (event) =>
+          (filter === "all" || event.category === filter) &&
+          `${event.title} ${event.description}`.toLowerCase().includes(query.toLowerCase()),
+      );
+    return <section className="daily-feed">
+      <div className="feed-heading"><div><span className="eyebrow">ЛЕНТА ДОБРЫХ ДЕЛ</span><h1>Выбирай в своём темпе</h1><p className="lead">Рекомендации на сегодня закончились. Здесь доступны все актуальные дела.</p></div><span className="tomorrow-note"><Sprout size={15}/> Новая подборка завтра</span></div>
+      <div className="filter-row">
+        <div className="chips">{Object.entries(categories).map(([value, title]) => <button key={value} className={filter === value ? "chip active" : "chip"} onClick={() => setFilter(value)}>{title}</button>)}</div>
+        <label className="search"><Search size={17}/><input aria-label="Поиск добрых дел" placeholder="Найти своё…" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
+      </div>
+      <div className="catalog-meta"><span><MapPin size={14}/>Москва · {events.length} дел</span><span>Данные ДОБРО от 09.09.2026</span></div>
+      {events.length ? <div className="cards catalog">{events.map((event) => <Card key={event.id} e={event}/>)}</div> : <div className="empty"><Search size={32}/><h2>Пока ничего не нашлось</h2><p>Попробуй другое слово или верни все направления.</p><button className="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}
+      <p className="source-caption">Это подборка возможностей, а не подтверждённых смен. У каждой карточки есть источник и понятный следующий шаг.</p>
+    </section>;
   }
   function Empty({
     title,
@@ -802,7 +839,7 @@ function App() {
               </button>;
             })}
           </div>
-          <div className="interest-actions"><span>{interestSelection.length < 3 ? `Выбери ещё ${3 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 3} onClick={() => act(async () => { const category = interestSelection.length === 1 && ["animals", "people"].includes(interestSelection[0]) ? interestSelection[0] : "all"; const nextProfile = { ...profile, category, interests: interestSelection }; await save(nextProfile); setProfile(nextProfile); setFilter(category); setOnboard(false); setSwipeIndex(0); go("home"); })}>Продолжить <ArrowRight size={18} /></button></div>
+          <div className="interest-actions"><span>{interestSelection.length < 3 ? `Выбери ещё ${3 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 3} onClick={() => act(async () => { const category = interestSelection.length === 1 && ["animals", "people"].includes(interestSelection[0]) ? interestSelection[0] : "all"; const nextProfile = { ...profile, category, interests: interestSelection }; await save(nextProfile); setProfile(nextProfile); setFilter(category); setOnboard(false); setSwipeIndex(0); writeDailySwipe(data.user.id, 0); go("home"); })}>Продолжить <ArrowRight size={18} /></button></div>
         </section>
       </div>
     );
@@ -946,23 +983,7 @@ function App() {
             </div>}
           </div>
           <div className="swipe-home-actions"><button className="swipe-round skip" onClick={swipeNext} aria-label="Показать следующее"><X size={22}/></button><span>Потяни карточку или выбери действие</span><button className="swipe-round like" onClick={swipeNext} aria-label="Мне подходит"><Heart size={22}/></button></div>
-        </section> : <section className="recommended">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">ВСЕ ДОСТУПНЫЕ ДЕЛА</span>
-              <h2>Выбирай в своём темпе</h2>
-            </div>
-            <button className="text-button" onClick={() => go("discover")}>
-              Фильтры <ArrowRight size={17} />
-            </button>
-          </div>
-          <div className="cards">
-            {chosen.map((e) => (
-              <Card key={e.id} e={e} />
-            ))}
-          </div>
-        </section>}
-        {swipeFinished && <div className="swipe-finished"><span>Все первые подсказки закончились</span><button className="text-button" onClick={()=>setSwipeIndex(0)}>Посмотреть ещё раз <RefreshCw size={14}/></button></div>}
+        </section> : <CatalogFeed />}
         <section className="together-banner">
           <div className="people-mark">
             <span>ты</span>
@@ -985,82 +1006,7 @@ function App() {
         </section>
       </>
     );
-  else if (tab === "discover") {
-    const events = data.catalog
-      .filter(live)
-      .filter(
-        (e) =>
-          (filter === "all" || e.category === filter) &&
-          `${e.title} ${e.description}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-      );
-    content = (
-      <>
-        <span className="eyebrow">НЕБОЛЬШОЕ ДЕЛО. НАСТОЯЩАЯ ПОМОЩЬ.</span>
-        <h1>Что тебе по душе?</h1>
-        <p className="lead">
-          Выбрали понятные точки входа из ДОБРО. Условия первого визита уточним
-          вместе с организатором.
-        </p>
-        <div className="filter-row">
-          <div className="chips">
-            {Object.entries(categories).map(([v, t]) => (
-              <button
-                key={v}
-                className={filter === v ? "chip active" : "chip"}
-                onClick={() => setFilter(v)}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <label className="search">
-            <Search size={17} />
-            <input
-              aria-label="Поиск добрых дел"
-              placeholder="Найти своё…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-        </div>
-        <div className="catalog-meta">
-          <span>
-            <MapPin size={14} />
-            Москва · {events.length} дел
-          </span>
-          <span>Данные ДОБРО от 09.09.2026</span>
-        </div>
-        {events.length ? (
-          <div className="cards catalog">
-            {events.map((e) => (
-              <Card key={e.id} e={e} />
-            ))}
-          </div>
-        ) : (
-          <div className="empty">
-            <Search size={32} />
-            <h2>Пока ничего не нашлось</h2>
-            <p>Попробуй другое слово или верни все направления.</p>
-            <button
-              className="secondary"
-              onClick={() => {
-                setFilter("all");
-                setQuery("");
-              }}
-            >
-              Сбросить фильтры
-            </button>
-          </div>
-        )}
-        <p className="source-caption">
-          Это подборка возможностей, а не подтверждённых смен. У каждой карточки
-          есть источник и понятный следующий шаг.
-        </p>
-      </>
-    );
-  } else if (tab === "plan")
+  else if (tab === "plan")
     content = (
       <>
         <span className="eyebrow">ОТ «ХОЧУ» К «Я ИДУ»</span>
@@ -1249,10 +1195,8 @@ function App() {
             <I size={21} />
             <span>
               {id === "home"
-                ? "Начать"
-                : id === "discover"
-                  ? "Дела"
-                  : id === "plan"
+                ? "Дела"
+                : id === "plan"
                     ? "План"
                     : label}
             </span>
