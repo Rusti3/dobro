@@ -145,6 +145,9 @@ function App() {
     [inviteError, setInviteError] = useState(""),
     [settings, setSettings] = useState(false),
     [share, setShare] = useState("");
+  const [swipeIndex, setSwipeIndex] = useState(0),
+    [swipeDrag, setSwipeDrag] = useState(0),
+    [swipeStart, setSwipeStart] = useState(null);
   const inviteCode =
     new URLSearchParams(location.search).get("invite") ||
     tg?.initDataUnsafe?.start_param?.replace(/^i_/, "");
@@ -153,6 +156,7 @@ function App() {
       const d = await api("/bootstrap");
       setData(d);
       setProfile(d.user.profile);
+      if (!d.user.onboarded) setOnboard(true);
       setFatal("");
     } catch (e) {
       setFatal(e.message);
@@ -278,6 +282,12 @@ function App() {
   const recommended = [...chosen].sort(
     (a, b) => Number(b.id === "11597695") - Number(a.id === "11597695"),
   );
+  const swipeItems = recommended.slice(0, 3);
+  const swipeFinished = swipeIndex >= swipeItems.length;
+  function swipeNext() {
+    setSwipeIndex((i) => i + 1);
+    setSwipeDrag(0);
+  }
   const nav = [
     ["home", Sprout, "Первый шаг"],
     ["discover", Compass, "Добрые дела"],
@@ -908,7 +918,8 @@ function App() {
                     await save(profile);
                     setFilter(profile.category);
                     setOnboard(false);
-                    go("discover");
+                    setSwipeIndex(0);
+                    go("home");
                   })
             }
           >
@@ -1049,22 +1060,35 @@ function App() {
   else if (tab === "home")
     content = (
       <>
-        <section className="recommended">
+        {!swipeFinished ? <section className="swipe-home">
+          <div className="swipe-intro">
+            <div><span className="eyebrow">ПОД ТВОЙ ТЕМП</span><h1>Начнём с одного доброго дела</h1><p>Свайпай вправо, если откликается. Влево — если пока не твоё.</p></div>
+            <span className="swipe-count">{swipeIndex + 1} / {swipeItems.length}</span>
+          </div>
+          <div className="swipe-deck" onPointerDown={(e)=>{setSwipeStart(e.clientX); e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={(e)=>{if(swipeStart!==null) setSwipeDrag(e.clientX-swipeStart)}} onPointerUp={()=>{if(Math.abs(swipeDrag)>70){swipeNext()} else setSwipeDrag(0); setSwipeStart(null)}} onPointerCancel={()=>{setSwipeDrag(0);setSwipeStart(null)}}>
+            {swipeItems[swipeIndex] && <div className="swipe-home-card" style={{transform:`translateX(${swipeDrag}px) rotate(${swipeDrag/22}deg)`}}>
+              <div className="swipe-home-media">{swipeItems[swipeIndex].image ? <img src={swipeItems[swipeIndex].image} alt=""/> : <Plant/>}<span className="swipe-home-label">{categories[swipeItems[swipeIndex].category]}</span>{Math.abs(swipeDrag)>34&&<span className={`swipe-verdict ${swipeDrag>0?'yes':''}`}>{swipeDrag>0?'ХОЧУ':'ПОТОМ'}</span>}</div>
+              <div className="swipe-home-copy"><span className="event-support"><span/> {swipeItems[swipeIndex].support}</span><h2>{swipeItems[swipeIndex].short}</h2><p>{swipeItems[swipeIndex].intro}</p><button className="text-button" onClick={()=>setDetail(swipeItems[swipeIndex])}>Подробнее <ArrowUpRight size={15}/></button></div>
+            </div>}
+          </div>
+          <div className="swipe-home-actions"><button className="swipe-round skip" onClick={swipeNext} aria-label="Показать следующее"><X size={22}/></button><span>Потяни карточку или выбери действие</span><button className="swipe-round like" onClick={swipeNext} aria-label="Мне подходит"><Heart size={22}/></button></div>
+        </section> : <section className="recommended">
           <div className="section-head">
             <div>
-              <span className="eyebrow">НЕ НУЖНО СРАЗУ МЕНЯТЬ МИР</span>
-              <h2>Можно начать вот с этого</h2>
+              <span className="eyebrow">ВСЕ ДОСТУПНЫЕ ДЕЛА</span>
+              <h2>Выбирай в своём темпе</h2>
             </div>
             <button className="text-button" onClick={() => go("discover")}>
-              Все дела <ArrowRight size={17} />
+              Фильтры <ArrowRight size={17} />
             </button>
           </div>
           <div className="cards">
-            {recommended.slice(0, 3).map((e) => (
+            {chosen.map((e) => (
               <Card key={e.id} e={e} />
             ))}
           </div>
-        </section>
+        </section>}
+        {swipeFinished && <div className="swipe-finished"><span>Все первые подсказки закончились</span><button className="text-button" onClick={()=>setSwipeIndex(0)}>Посмотреть ещё раз <RefreshCw size={14}/></button></div>}
         <section className="together-banner">
           <div className="people-mark">
             <span>ты</span>
