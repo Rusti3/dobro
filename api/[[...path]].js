@@ -74,13 +74,13 @@ function user(req, res) {
     u = memory.users.get(id) || {
       id,
       name: "Друг",
-      profile: { city: "Москва", category: "all", barrier: "company" },
+      profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
       reminders: false,
     };
   } else fail("Откройте приложение из Telegram.", 401);
   const existing = memory.users.get(u.id);
   const complete = {
-    profile: {city:'Москва',category:'all',barrier:'company'},
+    profile: {city:'Москва',category:'all',barrier:'company',interests:[]},
     reminders:false,
     createdAt:new Date().toISOString(),
     ...existing,
@@ -154,7 +154,7 @@ async function webhook(req, res) {
     const u = memory.users.get(id) || {
       id,
       name: m.from.first_name || "Друг",
-      profile: { city: "Москва", category: "all", barrier: "company" },
+      profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
       reminders: false,
       chatId: m.chat.id,
     };
@@ -238,6 +238,9 @@ export default async function handler(req, res) {
         barrier: ["company", "unknown", "time"].includes(body.barrier)
           ? body.barrier
           : u.profile.barrier,
+        interests: Array.isArray(body.interests)
+          ? body.interests.filter((value) => typeof value === "string").slice(0, 12)
+          : (u.profile.interests || []),
       };
       u.onboarded = true;
       if (typeof body.reminders === "boolean") u.reminders = body.reminders;

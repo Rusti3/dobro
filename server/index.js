@@ -77,7 +77,7 @@ function user(req, res) {
     u = {
       id,
       name,
-      profile: { city: "Москва", category: "all", barrier: "company" },
+      profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
       reminders: false,
       createdAt: new Date().toISOString(),
     };
@@ -176,6 +176,9 @@ const server = http.createServer(async (req, res) => {
         barrier: ["company", "unknown", "time"].includes(data.barrier)
           ? data.barrier
           : u.profile.barrier,
+        interests: Array.isArray(data.interests)
+          ? data.interests.filter((value) => typeof value === "string").slice(0, 12)
+          : (u.profile.interests || []),
       };
       u.onboarded = true;
       if (typeof data.reminders === "boolean") u.reminders = data.reminders;

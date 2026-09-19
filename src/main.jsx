@@ -45,6 +45,15 @@ async function api(url, method = "GET", body) {
   return data;
 }
 const categories = { all: "Всё добро", animals: "Животным", people: "Людям" };
+const interestOptions = [
+  ["animals", "Животные", "Забота о тех, кто ждёт своего человека"],
+  ["people", "Помощь людям", "Общение, поддержка и тёплые встречи"],
+  ["ecology", "Экология", "Город, природа и чистые берега"],
+  ["elderly", "Пожилые люди", "Быть рядом и делиться вниманием"],
+  ["education", "Образование", "Помогать детям и делиться знаниями"],
+  ["donation", "Донорство", "Поддержать тех, кому нужна помощь"],
+  ["neighborhood", "Свой район", "Делать место вокруг добрее"],
+];
 const dateLabel = (d) =>
   d
     ? new Date(d).toLocaleString("ru-RU", {
@@ -137,6 +146,7 @@ function App() {
     [onboard, setOnboard] = useState(false),
     [step, setStep] = useState(0),
     [profile, setProfile] = useState({ category: "all", barrier: "company" }),
+    [interestSelection, setInterestSelection] = useState([]),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState(""),
     [toast, setToast] = useState(""),
@@ -156,6 +166,7 @@ function App() {
       const d = await api("/bootstrap");
       setData(d);
       setProfile(d.user.profile);
+      setInterestSelection(d.user.profile.interests || []);
       if (!d.user.onboarded) setOnboard(true);
       setFatal("");
     } catch (e) {
@@ -747,7 +758,7 @@ function App() {
             onClick={() => {
               setOnboard(true);
               setSettings(false);
-              setStep(0);
+              setInterestSelection(profile.interests || []);
             }}
           >
             Изменить предпочтения
@@ -777,160 +788,23 @@ function App() {
     );
   else if (onboard)
     content = (
-      <>
-        <button
-          className="back"
-          onClick={() => (step ? setStep(step - 1) : setOnboard(false))}
-        >
-          <ArrowLeft size={17} />
-          Назад
-        </button>
-        <div className="onboarding">
-          <span className="eyebrow">ЗНАКОМСТВО · {step + 1} ИЗ 3</span>
-          <div className="step-lines">
-            {[0, 1, 2].map((i) => (
-              <span key={i} className={i <= step ? "on" : ""} />
-            ))}
+      <div className="interest-onboarding" role="dialog" aria-modal="true" aria-labelledby="interest-title">
+        <section className="interest-panel">
+          <button className="interest-close" aria-label="Закрыть" onClick={() => setOnboard(false)}><X size={19} /></button>
+          <div className="interest-copy"><span className="eyebrow">ДАВАЙ ЗНАКОМИТЬСЯ</span><h1 id="interest-title">Выбери свой вкус</h1><p>Отметь хотя бы 3 направления, которые тебе нравятся</p></div>
+          <div className="interest-grid">
+            {interestOptions.map(([id, title, description], index) => {
+              const selected = interestSelection.includes(id);
+              const source = data.catalog.find((event) => event.gardenCategory === id || event.category === id)?.image || data.catalog[index % data.catalog.length]?.image;
+              return <button key={id} className={`interest-card ${selected ? "selected" : ""}`} aria-pressed={selected} onClick={() => setInterestSelection((current) => selected ? current.filter((item) => item !== id) : [...current, id])}>
+                <span className="interest-image" style={{ backgroundImage: source ? `url(${source})` : undefined }}><span className="interest-tint" />{selected && <span className="interest-check"><Check size={14} strokeWidth={3} /></span>}</span>
+                <span className="interest-title">{title}</span><span className="interest-description">{description}</span>
+              </button>;
+            })}
           </div>
-          <h1>
-            {["Что тебе ближе?", "Что мешает начать?", "Начнём с малого"][step]}
-          </h1>
-          <p className="lead">
-            {
-              [
-                "Здесь нет правильного ответа. Выбери то, на что откликаешься.",
-                "Подстроим первый шаг под тебя. Можно передумать в любой момент.",
-                "Сейчас подбираем дела в Москве. Один визит — уже хороший результат.",
-              ][step]
-            }
-          </p>
-          {step === 0 ? (
-            <div className="choices">
-              {[
-                [
-                  "animals",
-                  "Животные",
-                  "Забота о тех, кто ждёт своего человека",
-                  Heart,
-                ],
-                [
-                  "people",
-                  "Люди",
-                  "Общение, творчество и поддержка",
-                  HandHeart,
-                ],
-                [
-                  "all",
-                  "Пока не знаю",
-                  "Хочу посмотреть разные варианты",
-                  Compass,
-                ],
-              ].map(([v, t, s, I]) => (
-                <button
-                  className={
-                    profile.category === v ? "choice selected" : "choice"
-                  }
-                  key={v}
-                  onClick={() => setProfile({ ...profile, category: v })}
-                >
-                  <I />
-                  <div>
-                    <strong>{t}</strong>
-                    <p>{s}</p>
-                  </div>
-                  {profile.category === v ? (
-                    <Check size={20} />
-                  ) : (
-                    <ChevronRight size={20} />
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : step === 1 ? (
-            <div className="choices">
-              {[
-                [
-                  "company",
-                  "Не хочется идти одному",
-                  "Подготовим приглашение знакомому человеку",
-                  Users,
-                ],
-                [
-                  "unknown",
-                  "Не понимаю, что меня ждёт",
-                  "Разберём первый визит по шагам",
-                  BookOpen,
-                ],
-                [
-                  "time",
-                  "Боюсь не найти время",
-                  "Сначала узнаем длительность у организатора",
-                  Clock,
-                ],
-              ].map(([v, t, s, I]) => (
-                <button
-                  className={
-                    profile.barrier === v ? "choice selected" : "choice"
-                  }
-                  key={v}
-                  onClick={() => setProfile({ ...profile, barrier: v })}
-                >
-                  <I />
-                  <div>
-                    <strong>{t}</strong>
-                    <p>{s}</p>
-                  </div>
-                  {profile.barrier === v ? (
-                    <Check size={20} />
-                  ) : (
-                    <ChevronRight size={20} />
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="welcome-note">
-              <Plant small />
-              <div>
-                <h3>
-                  Тебе не нужно быть
-                  <br />
-                  опытным волонтёром.
-                </h3>
-                <p>
-                  Достаточно интереса. Найдём понятную точку входа, а детали
-                  согласуем до визита.
-                </p>
-                <span>
-                  <MapPin size={15} />
-                  Москва · пилотный город
-                </span>
-              </div>
-            </div>
-          )}
-          <button
-            className="primary"
-            disabled={busy}
-            onClick={() =>
-              step < 2
-                ? setStep(step + 1)
-                : act(async () => {
-                    await save(profile);
-                    setFilter(profile.category);
-                    setOnboard(false);
-                    setSwipeIndex(0);
-                    go("home");
-                  })
-            }
-          >
-            {step < 2 ? "Продолжить" : "Показать подходящие дела"}
-            <ArrowRight size={18} />
-          </button>
-          <p className="small-text muted">
-            Никаких обязательств. Ты выбираешь свой темп.
-          </p>
-        </div>
-      </>
+          <div className="interest-actions"><span>{interestSelection.length < 3 ? `Выбери ещё ${3 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 3} onClick={() => act(async () => { const category = interestSelection.length === 1 && ["animals", "people"].includes(interestSelection[0]) ? interestSelection[0] : "all"; const nextProfile = { ...profile, category, interests: interestSelection }; await save(nextProfile); setProfile(nextProfile); setFilter(category); setOnboard(false); setSwipeIndex(0); go("home"); })}>Продолжить <ArrowRight size={18} /></button></div>
+        </section>
+      </div>
     );
   else if (detail)
     content = (
