@@ -7,6 +7,7 @@ import { createStore } from "./store.js";
 import { telegramUser, validatePlan } from "./domain.js";
 import { startBot } from "./telegram.js";
 import { validateHours } from './garden.js';
+import { recommendationView, recordFeedback, resetRecommendation, themeIds } from './recommendation.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const store = createStore(
   process.env.DB_PATH || path.join(root, "var/app.sqlite"),
@@ -78,6 +79,8 @@ function user(req, res) {
       id,
       name,
       profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
+      interestOnboarded: false,
+      onboarded: false,
       reminders: false,
       createdAt: new Date().toISOString(),
     };
@@ -159,15 +162,23 @@ const server = http.createServer(async (req, res) => {
     }
     const u = user(req, res);
     const data = req.method === "GET" ? {} : await body(req);
-    if (url.pathname === "/api/bootstrap" && req.method === "GET")
+    if (url.pathname === "/api/bootstrap" && req.method === "GET") {
+      const recommendations = recommendationView(u, catalog);
+      store.saveUser(u);
       return json(res, 200, {
         user: u,
         plans: mine(u),
         catalog,
+        recommendations,
         mode: demo ? "demo" : "telegram",
         botUsername: process.env.BOT_USERNAME || null,
       });
+    }
     if (url.pathname === "/api/profile" && req.method === "PATCH") {
+      const interests = Array.isArray(data.interests)
+        ? [...new Set(data.interests.filter((value) => themeIds.includes(value)))].slice(0, 14)
+        : null;
+      if (interests && interests.length < 5) fail("Выберите минимум 5 интересов.");
       u.profile = {
         city: "Москва",
         category: ["all", "animals", "people"].includes(data.category)
@@ -176,14 +187,19 @@ const server = http.createServer(async (req, res) => {
         barrier: ["company", "unknown", "time"].includes(data.barrier)
           ? data.barrier
           : u.profile.barrier,
-        interests: Array.isArray(data.interests)
-          ? data.interests.filter((value) => typeof value === "string").slice(0, 12)
-          : (u.profile.interests || []),
+        interests: interests || (u.profile.interests || []),
       };
-      u.onboarded = true;
+      if (interests) {
+        resetRecommendation(u, catalog, interests);
+      }
       if (typeof data.reminders === "boolean") u.reminders = data.reminders;
       store.saveUser(u);
       return json(res, 200, u);
+    }
+    if (url.pathname === "/api/recommendations/feedback" && req.method === "POST") {
+      recordFeedback(u, catalog, data);
+      store.saveUser(u);
+      return json(res, 200, { user: u, recommendations: recommendationView(u, catalog) });
     }
     if (url.pathname === "/api/me" && req.method === "DELETE") {
       store.deleteUser(u.id);
@@ -202,6 +218,8 @@ const server = http.createServer(async (req, res) => {
           !["done", "cancelled"].includes(p.status),
       );
       if (existing) return json(res, 200, existing);
+      recordFeedback(u, catalog, { eventId: event.id, action: "like", context: "plan" });
+      store.saveUser(u);
       const p = {
         id: randomUUID(),
         owner: u.id,
@@ -256,6 +274,8 @@ const server = http.createServer(async (req, res) => {
           p.status = "done";
           p.reflection = data.reflection;
           p.completedAt = new Date().toISOString();
+          recordFeedback(u, catalog, { eventId: p.eventId, action: "like", context: "visit" });
+          store.saveUser(u);
           store.revoke(p.id);
         } else {
           Object.assign(

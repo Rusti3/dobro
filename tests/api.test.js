@@ -11,7 +11,7 @@ test('Two-user invitation, ownership, persistence, revocation and deletion',asyn
  t.after(()=>{child?.kill();});
  const base=`http://127.0.0.1:${port}`;const wait=async()=>{for(let n=0;n<80;n++){try{if((await fetch(base+'/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server did not start');};await wait();
  const client=()=>{let cookie='';return async(url,method='GET',body)=>{const r=await fetch(base+'/api'+url,{method,headers:{'Content-Type':'application/json',Cookie:cookie},...(body?{body:JSON.stringify(body)}:{})});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};};};
- const a=client(),b=client(),outsider=client();const initial=await a('/bootstrap');await b('/bootstrap');await outsider('/bootstrap');assert.equal(initial.data.catalog.length,6);
+ const a=client(),b=client(),outsider=client();const initial=await a('/bootstrap');await b('/bootstrap');await outsider('/bootstrap');assert.ok(initial.data.catalog.length>=50);
  const created=await a('/plans','POST',{eventId:'11597695'});assert.equal(created.status,201);const id=created.data.id;assert.equal((await a('/plans','POST',{eventId:'11597695'})).data.id,id);
  assert.equal((await outsider(`/plans/${id}`,'PATCH',{meeting:'hack'})).status,404);
  assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm'})).status,400);

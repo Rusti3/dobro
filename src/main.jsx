@@ -45,15 +45,26 @@ async function api(url, method = "GET", body) {
   return data;
 }
 const categories = { all: "Всё добро", animals: "Животным", people: "Людям" };
+const themeMeta = {
+  animals: ["🐶", "Животные", "Забота о тех, кто ждёт своего человека"],
+  ecology: ["🌱", "Экология", "Чистая среда и бережные привычки"],
+  elderly: ["👵", "Пожилые", "Общение, внимание и тёплые встречи"],
+  children: ["🧒", "Дети", "Поддержка, игры и новые возможности"],
+  city: ["🏙", "Помощь городу", "Делать свой район удобнее и добрее"],
+  creativity: ["🎨", "Творчество", "Мастерские, музыка, фото и культура"],
+  activity: ["🏃", "Активности", "Движение, спорт и выезды"],
+  education: ["🎓", "Образование", "Делиться знаниями и быть наставником"],
+  events: ["🤝", "Мероприятия", "Помогать команде на событиях"],
+  online_help: ["💻", "Онлайн-помощь", "Дизайн, тексты и помощь из дома"],
+  donation: ["🩸", "Донорство", "Поддержать тех, кому нужна кровь"],
+  recycling: ["♻️", "Переработка", "Сбор вещей и вторсырья"],
+  nature: ["🌳", "Природа", "Парки, леса, берега и животный мир"],
+  charity: ["❤️", "Благотворительность", "Адресная и гуманитарная помощь"],
+};
 const interestOptions = [
-  ["animals", "Животные", "Забота о тех, кто ждёт своего человека"],
-  ["people", "Помощь людям", "Общение, поддержка и тёплые встречи"],
-  ["ecology", "Экология", "Город, природа и чистые берега"],
-  ["elderly", "Пожилые люди", "Быть рядом и делиться вниманием"],
-  ["education", "Образование", "Помогать детям и делиться знаниями"],
-  ["donation", "Донорство", "Поддержать тех, кому нужна помощь"],
-  ["neighborhood", "Свой район", "Делать место вокруг добрее"],
-];
+  "animals", "ecology", "elderly", "children", "city", "creativity", "activity",
+  "education", "events", "online_help", "donation", "recycling", "nature", "charity",
+].map((id) => [id, ...themeMeta[id]]);
 const dateLabel = (d) =>
   d
     ? new Date(d).toLocaleString("ru-RU", {
@@ -65,12 +76,7 @@ const dateLabel = (d) =>
       }) + " · МСК"
     : "Дату согласуем с организатором";
 const live = (e) => Date.parse(e.endsAt) > Date.now();
-const moscowDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
-const swipeStorageKey = (userId) => `first-step:recommendations:${userId}:${moscowDay()}`;
-const eventInterest = (event) => event.gardenCategory || (event.id === "11521651" ? "elderly" : event.category);
-const stableNumber = (value) => [...String(value)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 7);
-const readDailySwipe = (userId) => { try { const value = Number(localStorage.getItem(swipeStorageKey(userId)) || 0); return Number.isFinite(value) ? value : 0; } catch { return 0; } };
-const writeDailySwipe = (userId, value) => { try { localStorage.setItem(swipeStorageKey(userId), String(value)); } catch {} };
+const themeTitle = (event) => themeMeta[event.theme]?.[1] || categories[event.category] || "Доброе дело";
 function Plant({ stage = 2, small = false }) {
   return (
     <svg
@@ -151,7 +157,6 @@ function App() {
     }),
     [detail, setDetail] = useState(null),
     [onboard, setOnboard] = useState(false),
-    [step, setStep] = useState(0),
     [profile, setProfile] = useState({ category: "all", barrier: "company" }),
     [interestSelection, setInterestSelection] = useState([]),
     [filter, setFilter] = useState("all"),
@@ -161,9 +166,10 @@ function App() {
     [invite, setInvite] = useState(null),
     [inviteError, setInviteError] = useState(""),
     [settings, setSettings] = useState(false),
-    [share, setShare] = useState("");
-  const [swipeIndex, setSwipeIndex] = useState(0),
-    [swipeDrag, setSwipeDrag] = useState(0),
+    [share, setShare] = useState(""),
+    [calibrationDone, setCalibrationDone] = useState(false),
+    [showCatalog, setShowCatalog] = useState(false);
+  const [swipeDrag, setSwipeDrag] = useState(0),
     [swipeStart, setSwipeStart] = useState(null);
   const inviteCode =
     new URLSearchParams(location.search).get("invite") ||
@@ -174,8 +180,7 @@ function App() {
       setData(d);
       setProfile(d.user.profile);
       setInterestSelection(d.user.profile.interests || []);
-      setSwipeIndex(readDailySwipe(d.user.id));
-      if (!d.user.onboarded) setOnboard(true);
+      setOnboard(d.recommendations?.stage === "interests");
       setFatal("");
     } catch (e) {
       setFatal(e.message);
@@ -198,7 +203,7 @@ function App() {
   useEffect(() => {
     const back = () => {
       setDetail(null);
-      setOnboard(false);
+      if (data?.user?.interestOnboarded) setOnboard(false);
       setSettings(false);
     };
     if (detail || onboard || settings) {
@@ -206,13 +211,13 @@ function App() {
       tg?.BackButton?.onClick(back);
     } else tg?.BackButton?.hide();
     return () => tg?.BackButton?.offClick(back);
-  }, [detail, onboard, settings]);
+  }, [detail, onboard, settings, data?.user?.interestOnboarded]);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [tab, detail, onboard, settings]);
   useEffect(() => {
-    if (swipeIndex >= 3) window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [swipeIndex]);
+    if (data?.recommendations?.stage === "feed") window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [data?.recommendations?.stage]);
   async function act(fn) {
     if (busy) return;
     setBusy(true);
@@ -234,10 +239,6 @@ function App() {
   }
   function go(t) {
     const nextTab = t === "discover" ? "home" : t;
-    if (t === "discover" && data) {
-      setSwipeIndex(3);
-      writeDailySwipe(data.user.id, 3);
-    }
     setTab(nextTab);
     setDetail(null);
     setOnboard(false);
@@ -302,21 +303,24 @@ function App() {
   );
   const done = data.plans.filter((p) => p.status === "done");
   const chosen = data.catalog.filter(live);
-  const interests = profile.interests || [];
-  const dailySeed = stableNumber(`${data.user.id}:${moscowDay()}`);
-  const recommended = [...chosen].sort((a, b) => {
-    const relevance = Number(interests.includes(eventInterest(b))) - Number(interests.includes(eventInterest(a)));
-    return relevance || stableNumber(`${a.id}:${dailySeed}`) - stableNumber(`${b.id}:${dailySeed}`);
-  });
-  const swipeItems = recommended.slice(0, 3);
-  const swipeFinished = swipeIndex >= swipeItems.length;
-  function swipeNext() {
-    setSwipeIndex((i) => {
-      const next = Math.min(i + 1, swipeItems.length);
-      writeDailySwipe(data.user.id, next);
-      return next;
-    });
+  const catalogById = new Map(data.catalog.map((event) => [event.id, event]));
+  const recommendations = data.recommendations || { stage: "interests" };
+  const calibrationItem = recommendations.stage === "calibration"
+    ? recommendations.items?.[recommendations.completed]
+    : null;
+  const dailyResponded = new Set(recommendations.daily?.feedback?.map((item) => item.eventId) || []);
+  const dailyId = recommendations.daily?.ids?.find((id) => !dailyResponded.has(id));
+  const swipeEvent = catalogById.get(calibrationItem?.id || dailyId);
+  const swipeContext = recommendations.stage === "calibration" ? "calibration" : "daily";
+  async function sendFeedback(action) {
+    if (!swipeEvent || busy) return;
     setSwipeDrag(0);
+    await act(async () => {
+      const result = await api("/recommendations/feedback", "POST", { eventId: swipeEvent.id, action, context: swipeContext });
+      setData((current) => ({ ...current, user: result.user, recommendations: result.recommendations }));
+      setProfile(result.user.profile);
+      if (swipeContext === "calibration" && result.recommendations.stage !== "calibration") setCalibrationDone(true);
+    });
   }
   const nav = [
     ["home", Compass, "Добрые дела"],
@@ -342,7 +346,7 @@ function App() {
             ) : (
               <HandHeart size={13} />
             )}{" "}
-            {categories[e.category]}
+            {themeTitle(e)}
           </span>
           <span className="photo-arrow">
             <ArrowUpRight size={19} />
@@ -370,19 +374,59 @@ function App() {
       .filter(live)
       .filter(
         (event) =>
-          (filter === "all" || event.category === filter) &&
+          (filter === "all" || event.theme === filter) &&
           `${event.title} ${event.description}`.toLowerCase().includes(query.toLowerCase()),
       );
+    const sections = recommendations.sections || [{ id: "all", title: "Для тебя", subtitle: "Актуальные дела", eventIds: chosen.slice(0, 6).map((event) => event.id) }];
     return <section className="daily-feed">
-      <div className="feed-heading"><div><span className="eyebrow">ЛЕНТА ДОБРЫХ ДЕЛ</span><h1>Выбирай в своём темпе</h1><p className="lead">Рекомендации на сегодня закончились. Здесь доступны все актуальные дела.</p></div><span className="tomorrow-note"><Sprout size={15}/> Новая подборка завтра</span></div>
-      <div className="filter-row">
-        <div className="chips">{Object.entries(categories).map(([value, title]) => <button key={value} className={filter === value ? "chip active" : "chip"} onClick={() => setFilter(value)}>{title}</button>)}</div>
-        <label className="search"><Search size={17}/><input aria-label="Поиск добрых дел" placeholder="Найти своё…" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
+      <div className="feed-heading"><div><span className="eyebrow">ТВОЯ ПЕРСОНАЛЬНАЯ ЛЕНТА</span><h1>Есть несколько хороших вариантов</h1><p className="lead">Лента учитывает темы и твои реакции. Чем больше выборов, тем точнее порядок.</p></div><span className="tomorrow-note"><Sprout size={15}/> Новая подборка завтра</span></div>
+      {recommendations.taste?.length > 0 && <div className="taste-row"><span>Сейчас тебе ближе:</span>{recommendations.taste.map((item) => <span className="taste-pill" key={item.id}>{themeMeta[item.id]?.[0]} {themeMeta[item.id]?.[1]} · {Math.round(item.weight * 100)}%</span>)}</div>}
+      <div className="feed-sections">
+        {sections.map((section) => {
+          const items = section.eventIds.map((id) => catalogById.get(id)).filter(Boolean);
+          if (!items.length) return null;
+          return <section className="feed-block" key={section.id}>
+            <div className="section-head"><div><h2>{section.title}{section.id === "taste" ? " 🌱" : ""}</h2><p>{section.subtitle}</p></div><span>{items.length} вариантов</span></div>
+            <div className="feed-rail">{items.map((event) => <Card key={event.id} e={event}/>)}</div>
+          </section>;
+        })}
       </div>
-      <div className="catalog-meta"><span><MapPin size={14}/>Москва · {events.length} дел</span><span>Данные ДОБРО от 09.09.2026</span></div>
-      {events.length ? <div className="cards catalog">{events.map((event) => <Card key={event.id} e={event}/>)}</div> : <div className="empty"><Search size={32}/><h2>Пока ничего не нашлось</h2><p>Попробуй другое слово или верни все направления.</p><button className="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}
+      <section className="all-events">
+        <div className="catalog-callout"><div><span className="eyebrow">ВСЕ ДОБРЫЕ ДЕЛА</span><h2>{showCatalog ? "Весь каталог" : "Хочется посмотреть всё?"}</h2><p>{showCatalog ? "Фильтруй по теме или найди дело по слову." : `Ещё ${chosen.length} актуальных возможностей из выгрузки ДОБРО.`}</p></div><button className="secondary" onClick={() => setShowCatalog((value) => !value)}>{showCatalog ? "Свернуть каталог" : "Открыть каталог"} <ArrowRight size={16}/></button></div>
+        {showCatalog && <><div className="filter-row">
+          <div className="chips"><button className={filter === "all" ? "chip active" : "chip"} onClick={() => setFilter("all")}>Все</button>{Object.entries(themeMeta).map(([value, [, title]]) => <button key={value} className={filter === value ? "chip active" : "chip"} onClick={() => setFilter(value)}>{title}</button>)}</div>
+          <label className="search"><Search size={17}/><input aria-label="Поиск добрых дел" placeholder="Найти своё…" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
+        </div>
+        <div className="catalog-meta"><span><MapPin size={14}/>Москва · {events.length} дел</span><span>Данные ДОБРО от 09.09.2026</span></div>
+        {events.length ? <div className="cards catalog">{events.map((event) => <Card key={event.id} e={event}/>)}</div> : <div className="empty"><Search size={32}/><h2>Пока ничего не нашлось</h2><p>Попробуй другое слово или верни все направления.</p><button className="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}</>}
+      </section>
       <p className="source-caption">Это подборка возможностей, а не подтверждённых смен. У каждой карточки есть источник и понятный следующий шаг.</p>
     </section>;
+  }
+  function SwipeExperience() {
+    if (!swipeEvent) return <CatalogFeed />;
+    const calibration = swipeContext === "calibration";
+    const completed = calibration ? recommendations.completed : recommendations.daily.completed;
+    const target = calibration ? recommendations.target : recommendations.daily.target;
+    const reason = calibrationItem?.reason || "Подобрали на сегодня";
+    return <section className={`swipe-home ${calibration ? "calibration-swipe" : ""}`}>
+      <div className="swipe-intro">
+        <div><span className="eyebrow">{calibration ? "ШАГ 2 ИЗ 2 · НАСТРАИВАЕМ ТВОЙ ВКУС" : "РЕКОМЕНДАЦИИ НА СЕГОДНЯ"}</span><h1>{calibration ? "Куда ты действительно мог бы пойти?" : "Что откликается сегодня?"}</h1><p>{calibration ? "Свайпай вправо, если вариант подходит. Влево — если не твоё. Так мы поймём формат, компанию и темп без длинной анкеты." : "Каждый выбор помогает точнее собрать завтрашнюю подборку."}</p></div>
+        <span className="swipe-count">{completed + 1} / {target}</span>
+      </div>
+      <div className="swipe-progress" aria-label={`Пройдено ${completed} из ${target}`}>{Array.from({ length: target }, (_, index) => <span className={index < completed ? "done" : index === completed ? "current" : ""} key={index}/>)}</div>
+      <div className="swipe-deck" onPointerDown={(event) => { setSwipeStart(event.clientX); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (swipeStart !== null) setSwipeDrag(event.clientX - swipeStart); }} onPointerUp={() => { if (Math.abs(swipeDrag) > 70) sendFeedback(swipeDrag > 0 ? "like" : "skip"); else setSwipeDrag(0); setSwipeStart(null); }} onPointerCancel={() => { setSwipeDrag(0); setSwipeStart(null); }}>
+        <div className="swipe-home-card" style={{ transform: `translateX(${swipeDrag}px) rotate(${swipeDrag / 22}deg)` }}>
+          <div className="swipe-home-media">{swipeEvent.image ? <img src={swipeEvent.image} alt=""/> : <Plant/>}<span className="swipe-home-label">{themeMeta[swipeEvent.theme]?.[0]} {themeTitle(swipeEvent)}</span><span className="swipe-reason">{reason}</span>{Math.abs(swipeDrag) > 34 && <span className={`swipe-verdict ${swipeDrag > 0 ? "yes" : ""}`}>{swipeDrag > 0 ? "ХОЧУ" : "НЕ МОЁ"}</span>}</div>
+          <div className="swipe-home-copy"><span className="event-support"><span/> {swipeEvent.support}</span><h2>{swipeEvent.short}</h2><p>{swipeEvent.intro}</p><div className="trait-row"><span>{swipeEvent.traits?.format === "online" ? "Онлайн" : "Офлайн"}</span><span>{swipeEvent.traits?.social === "group" ? "В компании" : "Можно одному"}</span><span>{swipeEvent.traits?.duration === "short" ? "Около часа" : swipeEvent.traits?.duration === "long" ? "Регулярно" : "1–3 часа"}</span></div><button className="text-button" onClick={() => setDetail(swipeEvent)}>Подробнее <ArrowUpRight size={15}/></button></div>
+        </div>
+      </div>
+      <div className="swipe-home-actions"><button className="swipe-round skip" disabled={busy} onClick={() => sendFeedback("skip")} aria-label="Не моё"><X size={22}/></button><span>{busy ? "Запоминаем выбор…" : "Влево — не моё · вправо — хочу"}</span><button className="swipe-round like" disabled={busy} onClick={() => sendFeedback("like")} aria-label="Мне подходит"><Heart size={22}/></button></div>
+    </section>;
+  }
+  function CalibrationComplete() {
+    const top = recommendations.taste || [];
+    return <section className="calibration-complete"><div className="complete-orbit"><Sprout size={42}/><span>✨</span></div><span className="eyebrow">ПРОФИЛЬ ГОТОВ</span><h1>Мы собрали твою ленту</h1><p>Темы задали направление, а 12 выборов помогли понять удобный формат, темп и компанию.</p>{top.length > 0 && <div className="taste-row">{top.map((item) => <span className="taste-pill" key={item.id}>{themeMeta[item.id]?.[0]} {themeMeta[item.id]?.[1]}</span>)}</div>}<button className="primary" onClick={() => setCalibrationDone(false)}>Посмотреть рекомендации <ArrowRight size={18}/></button></section>;
   }
   function Empty({
     title,
@@ -773,7 +817,7 @@ function App() {
               disabled={data.mode === "demo" || busy}
               checked={data.user.reminders}
               onChange={(e) =>
-                act(() => save({ ...profile, reminders: e.target.checked }))
+                act(() => save({ reminders: e.target.checked }))
               }
             />
             Напомнить в Telegram
@@ -827,19 +871,19 @@ function App() {
     content = (
       <div className="interest-onboarding" role="dialog" aria-modal="true" aria-labelledby="interest-title">
         <section className="interest-panel">
-          <button className="interest-close" aria-label="Закрыть" onClick={() => setOnboard(false)}><X size={19} /></button>
-          <div className="interest-copy"><span className="eyebrow">ДАВАЙ ЗНАКОМИТЬСЯ</span><h1 id="interest-title">Выбери свой вкус</h1><p>Отметь хотя бы 3 направления, которые тебе нравятся</p></div>
+          {data.user.interestOnboarded && <button className="interest-close" aria-label="Закрыть" onClick={() => setOnboard(false)}><X size={19} /></button>}
+          <div className="interest-copy"><span className="eyebrow">ДАВАЙ ЗНАКОМИТЬСЯ · ШАГ 1 ИЗ 2</span><h1 id="interest-title">Что тебе близко?</h1><p>Выбери минимум 5 тем. Это даст ленте хорошую отправную точку.</p></div>
           <div className="interest-grid">
-            {interestOptions.map(([id, title, description], index) => {
+            {interestOptions.map(([id, emoji, title, description], index) => {
               const selected = interestSelection.includes(id);
-              const source = data.catalog.find((event) => event.gardenCategory === id || event.category === id)?.image || data.catalog[index % data.catalog.length]?.image;
+              const source = data.catalog.find((event) => event.theme === id)?.image || data.catalog[index % data.catalog.length]?.image;
               return <button key={id} className={`interest-card ${selected ? "selected" : ""}`} aria-pressed={selected} onClick={() => setInterestSelection((current) => selected ? current.filter((item) => item !== id) : [...current, id])}>
-                <span className="interest-image" style={{ backgroundImage: source ? `url(${source})` : undefined }}><span className="interest-tint" />{selected && <span className="interest-check"><Check size={14} strokeWidth={3} /></span>}</span>
+                <span className="interest-image" style={{ backgroundImage: source ? `url(${source})` : undefined }}><span className="interest-tint" /><span className="interest-emoji">{emoji}</span>{selected && <span className="interest-check"><Check size={14} strokeWidth={3} /></span>}</span>
                 <span className="interest-title">{title}</span><span className="interest-description">{description}</span>
               </button>;
             })}
           </div>
-          <div className="interest-actions"><span>{interestSelection.length < 3 ? `Выбери ещё ${3 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 3} onClick={() => act(async () => { const category = interestSelection.length === 1 && ["animals", "people"].includes(interestSelection[0]) ? interestSelection[0] : "all"; const nextProfile = { ...profile, category, interests: interestSelection }; await save(nextProfile); setProfile(nextProfile); setFilter(category); setOnboard(false); setSwipeIndex(0); writeDailySwipe(data.user.id, 0); go("home"); })}>Продолжить <ArrowRight size={18} /></button></div>
+          <div className="interest-actions"><span>{interestSelection.length < 5 ? `Выбери ещё ${5 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 5} onClick={() => act(async () => { await api("/profile", "PATCH", { interests: interestSelection }); await load(); setFilter("all"); setOnboard(false); setCalibrationDone(false); go("home"); })}>Настроить ленту <ArrowRight size={18} /></button></div>
         </section>
       </div>
     );
@@ -852,7 +896,7 @@ function App() {
         <article className="detail">
           <div className="detail-image">
             {detail.image && <img src={detail.image} alt={detail.short} />}
-            <span className="photo-tag">{categories[detail.category]}</span>
+            <span className="photo-tag">{themeTitle(detail)}</span>
           </div>
           <div className="detail-main">
             <span className="eyebrow">{detail.city} · ДОБРО</span>
@@ -971,20 +1015,8 @@ function App() {
   else if (tab === "home")
     content = (
       <>
-        {!swipeFinished ? <section className="swipe-home">
-          <div className="swipe-intro">
-            <div><span className="eyebrow">ПОД ТВОЙ ТЕМП</span><h1>Начнём с одного доброго дела</h1><p>Свайпай вправо, если откликается. Влево — если пока не твоё.</p></div>
-            <span className="swipe-count">{swipeIndex + 1} / {swipeItems.length}</span>
-          </div>
-          <div className="swipe-deck" onPointerDown={(e)=>{setSwipeStart(e.clientX); e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={(e)=>{if(swipeStart!==null) setSwipeDrag(e.clientX-swipeStart)}} onPointerUp={()=>{if(Math.abs(swipeDrag)>70){swipeNext()} else setSwipeDrag(0); setSwipeStart(null)}} onPointerCancel={()=>{setSwipeDrag(0);setSwipeStart(null)}}>
-            {swipeItems[swipeIndex] && <div className="swipe-home-card" style={{transform:`translateX(${swipeDrag}px) rotate(${swipeDrag/22}deg)`}}>
-              <div className="swipe-home-media">{swipeItems[swipeIndex].image ? <img src={swipeItems[swipeIndex].image} alt=""/> : <Plant/>}<span className="swipe-home-label">{categories[swipeItems[swipeIndex].category]}</span>{Math.abs(swipeDrag)>34&&<span className={`swipe-verdict ${swipeDrag>0?'yes':''}`}>{swipeDrag>0?'ХОЧУ':'ПОТОМ'}</span>}</div>
-              <div className="swipe-home-copy"><span className="event-support"><span/> {swipeItems[swipeIndex].support}</span><h2>{swipeItems[swipeIndex].short}</h2><p>{swipeItems[swipeIndex].intro}</p><button className="text-button" onClick={()=>setDetail(swipeItems[swipeIndex])}>Подробнее <ArrowUpRight size={15}/></button></div>
-            </div>}
-          </div>
-          <div className="swipe-home-actions"><button className="swipe-round skip" onClick={swipeNext} aria-label="Показать следующее"><X size={22}/></button><span>Потяни карточку или выбери действие</span><button className="swipe-round like" onClick={swipeNext} aria-label="Мне подходит"><Heart size={22}/></button></div>
-        </section> : <CatalogFeed />}
-        <section className="together-banner">
+        {calibrationDone ? <CalibrationComplete /> : ["calibration", "daily"].includes(recommendations.stage) ? <SwipeExperience /> : <CatalogFeed />}
+        {recommendations.stage === "feed" && <section className="together-banner">
           <div className="people-mark">
             <span>ты</span>
             <span>+1</span>
@@ -1003,7 +1035,7 @@ function App() {
           >
             <ArrowUpRight size={22} />
           </button>
-        </section>
+        </section>}
       </>
     );
   else if (tab === "plan")

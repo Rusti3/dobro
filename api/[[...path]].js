@@ -7,6 +7,7 @@ import {
 import { botReply, telegramUser } from "../server/domain.js";
 import { validateHours } from '../server/garden.js';
 import { webhookSecret } from '../server/telegram-config.js';
+import { recommendationView, recordFeedback, resetRecommendation, themeIds } from '../server/recommendation.js';
 
 const catalog = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), "data/catalog.json"), "utf8"),
@@ -76,6 +77,8 @@ function user(req, res) {
       name: "Друг",
       profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
       reminders: false,
+      interestOnboarded: false,
+      onboarded: false,
     };
   } else fail("Откройте приложение из Telegram.", 401);
   const existing = memory.users.get(u.id);
@@ -221,15 +224,23 @@ export default async function handler(req, res) {
     const u = user(req, res);
     const method = req.method;
     const body = method === "GET" ? {} : await readBody(req);
-    if (pathname === "/api/bootstrap" && method === "GET")
+    if (pathname === "/api/bootstrap" && method === "GET") {
+      const recommendations = recommendationView(u, catalog);
+      memory.users.set(u.id, u);
       return json(res, 200, {
         user: u,
         plans: plansFor(u),
         catalog,
+        recommendations,
         mode: process.env.DEMO_MODE === "true" ? "demo" : "telegram",
         botUsername: process.env.BOT_USERNAME || null,
       });
+    }
     if (pathname === "/api/profile" && method === "PATCH") {
+      const interests = Array.isArray(body.interests)
+        ? [...new Set(body.interests.filter((value) => themeIds.includes(value)))].slice(0, 14)
+        : null;
+      if (interests && interests.length < 5) fail("Выберите минимум 5 интересов.");
       u.profile = {
         city: "Москва",
         category: ["all", "animals", "people"].includes(body.category)
@@ -238,14 +249,19 @@ export default async function handler(req, res) {
         barrier: ["company", "unknown", "time"].includes(body.barrier)
           ? body.barrier
           : u.profile.barrier,
-        interests: Array.isArray(body.interests)
-          ? body.interests.filter((value) => typeof value === "string").slice(0, 12)
-          : (u.profile.interests || []),
+        interests: interests || (u.profile.interests || []),
       };
-      u.onboarded = true;
+      if (interests) {
+        resetRecommendation(u, catalog, interests);
+      }
       if (typeof body.reminders === "boolean") u.reminders = body.reminders;
       memory.users.set(u.id, u);
       return json(res, 200, u);
+    }
+    if (pathname === "/api/recommendations/feedback" && method === "POST") {
+      recordFeedback(u, catalog, body);
+      memory.users.set(u.id, u);
+      return json(res, 200, { user: u, recommendations: recommendationView(u, catalog) });
     }
     if (pathname === "/api/me" && method === "DELETE") {
       memory.users.delete(u.id);
@@ -264,6 +280,8 @@ export default async function handler(req, res) {
           !["done", "cancelled"].includes(p.status),
       );
       if (old) return json(res, 200, old);
+      recordFeedback(u, catalog, { eventId: e.id, action: "like", context: "plan" });
+      memory.users.set(u.id, u);
       const p = {
         id: randomUUID(),
         owner: u.id,
@@ -316,6 +334,8 @@ export default async function handler(req, res) {
           p.status = "done";
           p.reflection = body.reflection;
           p.completedAt = new Date().toISOString();
+          recordFeedback(u, catalog, { eventId: p.eventId, action: "like", context: "visit" });
+          memory.users.set(u.id, u);
         } else {
           Object.assign(p, validate({ ...p, ...body }, event(p.eventId)));
           if (body.checks)
