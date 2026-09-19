@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { ArrowRight, Droplets, Sun, Sprout, X, Lock, Flower2 } from 'lucide-react';
 import { gardenFor, species } from './garden-model.js';
+const GardenScene = lazy(() => import('./GardenScene.jsx'));
 import './garden.css';
 
 export function GardenPlant({ kind = 'oak', seed = false, dormant = false }) {
@@ -34,6 +35,8 @@ export default function Garden({data,go}) {
     <div className="garden-heading"><div><span className="eyebrow">КАЖДОЕ ДЕЛО ОСТАВЛЯЕТ СЛЕД</span><h1>Сад добрых дел</h1><p>Твоя помощь становится чем-то живым.</p></div><button className="secondary" onClick={()=>go('discover')}>Найти дело <ArrowRight size={17}/></button></div>
     <div className="garden-toolbar"><div className="garden-wallet"><span title="Всего заработано воды"><Droplets size={18}/><b>{garden.water}</b> воды</span><span title="Всего заработано солнца"><Sun size={18}/><b>{garden.sunlight}</b> солнца</span></div><button className="text-button" onClick={()=>{setPreview(!preview);setSelected(null);setPage(0);}}>{preview?'Вернуться в мой сад':'Посмотреть пример сада'}</button></div>
     <section className={`garden-land ${preview?'is-preview':''}`} aria-label={preview?'Пример выросшего сада':'Мой участок'}>
+      <Suspense fallback={<div className="garden-3d-loading">Собираем сад…</div>}><GardenScene objects={plots.slice(current*9,current*9+9)} preview={preview} selected={selected} onSelect={(id)=>setSelected(selected===id?null:id)} /></Suspense>
+      <div className="legacy-garden-layer">
       <div className="land-caption"><span>{preview?'Пример · вымышленные дела':'Твой постоянный участок'}</span><span>{garden.objects.length ? `${garden.objects.length} растений`:'Всё начинается с семечка'}</span></div>
       <svg fill="none" className="land-background" viewBox="0 0 900 460" preserveAspectRatio="none" aria-hidden="true"><path d="M0 150Q170 60 350 140T900 95V460H0Z" fill="#e0e7c8"/><path d="M0 280Q300 160 500 240T900 210V460H0Z" fill="#d3deba"/><path d="M550 460Q630 335 452 305T380 170" stroke="#eae4c9" strokeWidth="37" strokeLinecap="round"/><path d="M0 415Q130 375 235 413T550 425T900 380V460H0Z" fill="#becda4"/>{[80,205,710,790,310,620].map((x,i)=><path key={x} d={`M${x} ${370-i%3*70}l-4 -8m4 8l5 -11`} stroke="#9bb087" strokeWidth="2" strokeLinecap="round"/>)}<ellipse cx="750" cy="352" rx="17" ry="7" fill="#b3bca2"/><ellipse cx="145" cy="322" rx="11" ry="5" fill="#b3bca2"/></svg>
       <div className="garden-fence" aria-hidden="true">{Array.from({length:18},(_,i)=><i key={i}/>)}</div>
@@ -46,6 +49,7 @@ export default function Garden({data,go}) {
       {garden.pond&&<div className="garden-pond" aria-label="Пруд за десять визитов"/>}
       {garden.rare&&<div className="garden-rare" title="Редкий цветок за три визита" aria-label="Редкий цветок за три визита"><GardenPlant kind="flowers"/></div>}
       <div className="land-bottom"><span><Sprout size={15}/> Уровень {garden.level} · {garden.completed.length} завершённых дел</span>{pages>1&&<div><button disabled={current===0} onClick={()=>{setPage(current-1);setSelected(null);}}>←</button> {current+1} / {pages} <button disabled={current===pages-1} onClick={()=>{setPage(current+1);setSelected(null);}}>→</button></div>}</div>
+      </div>
     </section>
     {pick&&<section className="plant-story" aria-live="polite"><GardenPlant kind={species[pick.species].kind} seed={pick.seed} dormant={pick.seed && !garden.seedlings.some(p=>p.confirmed)}/><div><span className="eyebrow">{pick.seed?'ПЕРВАЯ ГЛАВА':'ИСТОРИЯ РАСТЕНИЯ'}</span><h2>{pick.seed?'Здесь вырастет твой первый результат':species[pick.species].name}</h2>{pick.seed?<p>Выбери дело, договорись о визите и после участия сохрани впечатление. Сразу появится полноценное растение.</p>:<><p>{pick.plan.event.short}</p><p className="muted">Посажено {date(pick.plan.completedAt)} · {pick.plan.hours || 0} ч помощи</p><span className="pill">{preview?'Пример истории':'Участие и часы отмечены мной'}</span></>}</div><button className="text-button" aria-label="Закрыть историю" onClick={()=>setSelected(null)}><X size={19}/></button></section>}
     {!preview&&<div className="garden-next"><div><span className="eyebrow">СЛЕДУЮЩИЙ ШАГ</span><h2>{garden.seedlings.length?'У твоего ростка уже есть план':garden.completed.length?'Для новой истории есть место':'Первое дело — первое большое растение'}</h2><p>{garden.seedlings.length?'Открой план: свяжись с организатором и подготовься к визиту.':'После участия получишь 100 воды и растение, которое останется в саду.'}</p></div><button className="primary" onClick={()=>go(garden.seedlings.length?'plan':'discover')}>{garden.seedlings.length?'Открыть мой план':'Выбрать доброе дело'}<ArrowRight size={18}/></button></div>}
