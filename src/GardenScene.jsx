@@ -117,12 +117,11 @@ function GardenWorld({ objects, onSelect, selected }) {
   </>;
 }
 
-export default function GardenScene({ objects = [], preview = false, selected, onSelect }) {
+export default function GardenScene({ objects = [], selected, onSelect }) {
   const visibleObjects = objects.length ? objects : [{ id: 'seed', seed: true }];
-  return <div className="garden-3d" aria-label={preview ? 'Пример 3D-сада' : 'Интерактивный 3D-сад'}>
+  return <div className="garden-3d" aria-label="Интерактивный 3D-сад">
     <Canvas shadows dpr={[1, 1.7]} camera={{ position: [6.8, 5.6, 7.2], fov: 37 }}>
       <GardenWorld objects={visibleObjects} selected={selected} onSelect={onSelect} />
     </Canvas>
-    <div className="garden-3d-hint">Потяни, чтобы рассмотреть сад · нажми на растение</div>
   </div>;
 }

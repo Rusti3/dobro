@@ -202,16 +202,20 @@ function App() {
   }, [toast]);
   useEffect(() => {
     const back = () => {
+      if (tab === "garden" && !detail && !onboard && !settings) {
+        go("home");
+        return;
+      }
       setDetail(null);
       if (data?.user?.interestOnboarded) setOnboard(false);
       setSettings(false);
     };
-    if (detail || onboard || settings) {
+    if (detail || onboard || settings || tab === "garden") {
       tg?.BackButton?.show();
       tg?.BackButton?.onClick(back);
     } else tg?.BackButton?.hide();
     return () => tg?.BackButton?.offClick(back);
-  }, [detail, onboard, settings, data?.user?.interestOnboarded]);
+  }, [tab, detail, onboard, settings, data?.user?.interestOnboarded]);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [tab, detail, onboard, settings]);
@@ -1131,7 +1135,9 @@ function App() {
         </div>
       </>
     );
-  else content = <Garden data={data} go={go} />;
+  else content = <Garden data={data} />;
+  if (tab === "garden" && !detail && !onboard && !settings && !invite && !inviteError)
+    return <Garden data={data} />;
   return (
     <div className="app">
       <aside className="sidebar">
