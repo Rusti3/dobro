@@ -332,6 +332,15 @@ function App() {
     ["together", Users, "Вместе"],
     ["plan", CalendarDays, "Мой план"],
   ];
+  function BottomNav({ garden = false }) {
+    return <nav className={garden ? "garden-nav" : "mobile-nav"} aria-label="Основная навигация">
+      {nav.map(([id, Icon, label]) => <button className={tab === id ? "active" : ""} key={id} onClick={() => go(id)}>
+        <Icon size={21} />
+        <span>{id === "home" ? "Дела" : id === "plan" ? "План" : label}</span>
+        {id === "plan" && active.length > 0 && <i>{active.length}</i>}
+      </button>)}
+    </nav>;
+  }
   function Card({ e, featured = false }) {
     return (
       <button
@@ -1136,8 +1145,11 @@ function App() {
       </>
     );
   else content = <Garden data={data} />;
-  if (tab === "garden" && !detail && !onboard && !settings && !invite && !inviteError)
-    return <Garden data={data} />;
+  const cleanScreen = !detail && !onboard && !settings && !invite && !inviteError;
+  if (tab === "garden" && cleanScreen)
+    return <div className="garden-only-shell"><Garden data={data} /><BottomNav garden /></div>;
+  if (tab === "home" && cleanScreen && (calibrationDone || ["calibration", "daily"].includes(recommendations.stage)))
+    return <div className="swipe-only-shell">{calibrationDone ? <CalibrationComplete /> : <SwipeExperience />}{toast && <div className="toast" role="status"><Check size={18}/>{toast}<button aria-label="Закрыть уведомление" onClick={() => setToast("")}><X size={16}/></button></div>}</div>;
   return (
     <div className="app">
       <aside className="sidebar">
@@ -1223,24 +1235,7 @@ function App() {
           <span>Реальные дела · данные ДОБРО</span>
         </footer>
       </div>
-      <nav className="mobile-nav" aria-label="Мобильная навигация">
-        {nav.map(([id, I, label]) => (
-          <button
-            className={tab === id ? "active" : ""}
-            key={id}
-            onClick={() => go(id)}
-          >
-            <I size={21} />
-            <span>
-              {id === "home"
-                ? "Дела"
-                : id === "plan"
-                    ? "План"
-                    : label}
-            </span>
-          </button>
-        ))}
-      </nav>
+      <BottomNav />
       {toast && (
         <div className="toast" role="status">
           <Check size={18} />
