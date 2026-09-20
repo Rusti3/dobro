@@ -21,6 +21,8 @@ const token = process.env.MAX_BOT_TOKEN;
 const appUrl = (process.env.MAX_MINI_APP_URL || "").trim().replace(/\/+$/, "");
 const botUsername = process.env.MAX_BOT_USERNAME || "";
 const webhookUrl = process.env.MAX_WEBHOOK_URL || "";
+const localAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+const localPreview = process.env.NODE_ENV !== "production";
 if (!demo && !token) throw new Error("MAX_BOT_TOKEN обязателен при DEMO_MODE=false.");
 if (token && !demo && (!appUrl.startsWith("https://") || !botUsername))
   throw new Error("MAX production requires HTTPS MAX_MINI_APP_URL and MAX_BOT_USERNAME.");
@@ -40,6 +42,12 @@ const json = (res, status, data) => {
 };
 function fail(message, status = 400) {
   throw Object.assign(new Error(message), { status });
+}
+function isLocalPreview(req) {
+  const localHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(
+    req.headers.host || "",
+  );
+  return localPreview && localHost && localAddresses.has(req.socket.remoteAddress || "");
 }
 async function body(req) {
   let raw = "";
@@ -64,7 +72,7 @@ function user(req, res) {
     } catch (e) {
       fail(e.message, 401);
     }
-  } else if (demo) {
+  } else if (demo || isLocalPreview(req)) {
     let session = req.headers.cookie?.match(
       /(?:^|;\s*)first_session=([a-f0-9]{48})(?:;|$)/,
     )?.[1];
@@ -142,7 +150,7 @@ const server = http.createServer(async (req, res) => {
       return fs.createReadStream(file).pipe(res);
     }
     if (url.pathname === "/api/health")
-      return json(res, 200, { ok: true, mode: demo ? "demo" : "max", transport: webhookUrl ? "webhook" : "polling" });
+      return json(res, 200, { ok: true, mode: demo || isLocalPreview(req) ? "demo" : "max", transport: webhookUrl ? "webhook" : "polling" });
     if (url.pathname === "/api/max/webhook") {
       if (req.method !== "POST") return json(res, 405, { error: "Метод не поддерживается." });
       const expected = process.env.MAX_WEBHOOK_SECRET || "";
@@ -187,7 +195,7 @@ const server = http.createServer(async (req, res) => {
         plans: mine(u),
         catalog,
         recommendations,
-         mode: demo ? "demo" : "max",
+         mode: demo || isLocalPreview(req) ? "demo" : "max",
          botUsername: botUsername || null,
       });
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUpRight,
@@ -20,7 +20,6 @@ import {
   Flower2,
   HandHeart,
   MessageCircle,
-  Search,
   BookOpen,
   X,
   Settings,
@@ -172,8 +171,6 @@ function App() {
     [onboard, setOnboard] = useState(false),
     [profile, setProfile] = useState({ category: "all", barrier: "company" }),
     [interestSelection, setInterestSelection] = useState([]),
-    [filter, setFilter] = useState("all"),
-    [query, setQuery] = useState(""),
     [toast, setToast] = useState(""),
     [busy, setBusy] = useState(false),
     [invite, setInvite] = useState(null),
@@ -181,9 +178,10 @@ function App() {
     [settings, setSettings] = useState(false),
     [share, setShare] = useState(""),
     [calibrationDone, setCalibrationDone] = useState(false),
-    [showCatalog, setShowCatalog] = useState(false);
+    [feedLimit, setFeedLimit] = useState(12);
   const [swipeDrag, setSwipeDrag] = useState(0),
     [swipeStart, setSwipeStart] = useState(null);
+  const feedSentinel = useRef(null);
   const inviteCode =
     new URLSearchParams(location.search).get("invite") ||
     maxApp?.initDataUnsafe?.start_param?.replace(/^i_/, "");
@@ -234,6 +232,18 @@ function App() {
   }, [tab, detail, onboard, settings]);
   useEffect(() => {
     if (data?.recommendations?.stage === "feed") window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [data?.recommendations?.stage]);
+  useEffect(() => {
+    const sentinel = feedSentinel.current;
+    if (!sentinel || data?.recommendations?.stage !== "feed") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setFeedLimit((limit) => limit + 12);
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
   }, [data?.recommendations?.stage]);
   async function act(fn) {
     if (busy) return;
@@ -396,16 +406,11 @@ function App() {
     );
   }
   function CatalogFeed() {
-    const events = data.catalog
-      .filter(live)
-      .filter(
-        (event) =>
-          (filter === "all" || event.theme === filter) &&
-          `${event.title} ${event.description}`.toLowerCase().includes(query.toLowerCase()),
-      );
     const sections = recommendations.sections || [{ id: "all", title: "Для тебя", subtitle: "Актуальные дела", eventIds: chosen.slice(0, 6).map((event) => event.id) }];
+    const recommendedIds = new Set(sections.flatMap((section) => section.eventIds));
+    const moreEvents = chosen.filter((event) => !recommendedIds.has(event.id));
+    const visibleEvents = moreEvents.slice(0, feedLimit);
     return <section className="daily-feed">
-      <div className="feed-heading"><div><span className="eyebrow">ТВОЯ ПЕРСОНАЛЬНАЯ ЛЕНТА</span><h1>Есть несколько хороших вариантов</h1><p className="lead">Лента учитывает темы и твои реакции. Чем больше выборов, тем точнее порядок.</p></div><span className="tomorrow-note"><Sprout size={15}/> Новая подборка завтра</span></div>
       {recommendations.taste?.length > 0 && <div className="taste-row"><span>Сейчас тебе ближе:</span>{recommendations.taste.map((item) => <span className="taste-pill" key={item.id}>{themeMeta[item.id]?.[0]} {themeMeta[item.id]?.[1]} · {Math.round(item.weight * 100)}%</span>)}</div>}
       <div className="feed-sections">
         {sections.map((section) => {
@@ -417,16 +422,10 @@ function App() {
           </section>;
         })}
       </div>
-      <section className="all-events">
-        <div className="catalog-callout"><div><span className="eyebrow">ВСЕ ДОБРЫЕ ДЕЛА</span><h2>{showCatalog ? "Весь каталог" : "Хочется посмотреть всё?"}</h2><p>{showCatalog ? "Фильтруй по теме или найди дело по слову." : `Ещё ${chosen.length} актуальных возможностей из выгрузки ДОБРО.`}</p></div><button className="secondary" onClick={() => setShowCatalog((value) => !value)}>{showCatalog ? "Свернуть каталог" : "Открыть каталог"} <ArrowRight size={16}/></button></div>
-        {showCatalog && <><div className="filter-row">
-          <div className="chips"><button className={filter === "all" ? "chip active" : "chip"} onClick={() => setFilter("all")}>Все</button>{Object.entries(themeMeta).map(([value, [, title]]) => <button key={value} className={filter === value ? "chip active" : "chip"} onClick={() => setFilter(value)}>{title}</button>)}</div>
-          <label className="search"><Search size={17}/><input aria-label="Поиск добрых дел" placeholder="Найти своё…" value={query} onChange={(event) => setQuery(event.target.value)}/></label>
-        </div>
-        <div className="catalog-meta"><span><MapPin size={14}/>Москва · {events.length} дел</span><span>Данные ДОБРО от 09.09.2026</span></div>
-        {events.length ? <div className="cards catalog">{events.map((event) => <Card key={event.id} e={event}/>)}</div> : <div className="empty"><Search size={32}/><h2>Пока ничего не нашлось</h2><p>Попробуй другое слово или верни все направления.</p><button className="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>Сбросить фильтры</button></div>}</>}
-      </section>
-      <p className="source-caption">Это подборка возможностей, а не подтверждённых смен. У каждой карточки есть источник и понятный следующий шаг.</p>
+      {moreEvents.length > 0 && <section className="infinite-events">
+        <div className="cards catalog">{visibleEvents.map((event) => <Card key={event.id} e={event}/>)}</div>
+        {visibleEvents.length < moreEvents.length && <div className="feed-sentinel" ref={feedSentinel} aria-hidden="true"/>}
+      </section>}
     </section>;
   }
   function SwipeExperience() {
@@ -437,7 +436,7 @@ function App() {
     const reason = calibrationItem?.reason || "Подобрали на сегодня";
     return <section className={`swipe-home ${calibration ? "calibration-swipe" : ""}`}>
       <div className="swipe-intro">
-        <div><span className="eyebrow">{calibration ? "ШАГ 2 ИЗ 2 · НАСТРАИВАЕМ ТВОЙ ВКУС" : "РЕКОМЕНДАЦИИ НА СЕГОДНЯ"}</span><h1>{calibration ? "Куда ты действительно мог бы пойти?" : "Что откликается сегодня?"}</h1><p>{calibration ? "Свайпай вправо, если вариант подходит. Влево — если не твоё. Так мы поймём формат, компанию и темп без длинной анкеты." : "Каждый выбор помогает точнее собрать завтрашнюю подборку."}</p></div>
+        <div><span className="eyebrow">{calibration ? "ШАГ 2 ИЗ 2 · НАСТРАИВАЕМ ТВОЙ ВКУС" : "РЕКОМЕНДАЦИИ НА СЕГОДНЯ"}</span><h1>{calibration ? "Куда ты действительно мог бы пойти?" : "Что откликается сегодня?"}</h1>{!calibration && <p>Каждый выбор помогает точнее собрать завтрашнюю подборку.</p>}</div>
         <span className="swipe-count">{completed + 1} / {target}</span>
       </div>
       <div className="swipe-progress" aria-label={`Пройдено ${completed} из ${target}`}>{Array.from({ length: target }, (_, index) => <span className={index < completed ? "done" : index === completed ? "current" : ""} key={index}/>)}</div>
@@ -909,7 +908,7 @@ function App() {
               </button>;
             })}
           </div>
-          <div className="interest-actions"><span>{interestSelection.length < 5 ? `Выбери ещё ${5 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 5} onClick={() => act(async () => { await api("/profile", "PATCH", { interests: interestSelection }); await load(); setFilter("all"); setOnboard(false); setCalibrationDone(false); go("home"); })}>Настроить ленту <ArrowRight size={18} /></button></div>
+          <div className="interest-actions"><span>{interestSelection.length < 5 ? `Выбери ещё ${5 - interestSelection.length}` : `Выбрано: ${interestSelection.length}`}</span><button className="primary" disabled={busy || interestSelection.length < 5} onClick={() => act(async () => { await api("/profile", "PATCH", { interests: interestSelection }); await load(); setFeedLimit(12); setOnboard(false); setCalibrationDone(false); go("home"); })}>Настроить ленту <ArrowRight size={18} /></button></div>
         </section>
       </div>
     );
@@ -1039,31 +1038,7 @@ function App() {
       </>
     );
   else if (tab === "home")
-    content = (
-      <>
-        {calibrationDone ? <CalibrationComplete /> : ["calibration", "daily"].includes(recommendations.stage) ? <SwipeExperience /> : <CatalogFeed />}
-        {recommendations.stage === "feed" && <section className="together-banner">
-          <div className="people-mark">
-            <span>ты</span>
-            <span>+1</span>
-          </div>
-          <div>
-            <h3>«Пойдём со мной?» — иногда этого достаточно.</h3>
-            <p>
-              Выбери дело и пригласи друга. У вас появится общий план первого
-              визита.
-            </p>
-          </div>
-          <button
-            className="round-button"
-            aria-label="Как пойти вместе"
-            onClick={() => go("together")}
-          >
-            <ArrowUpRight size={22} />
-          </button>
-        </section>}
-      </>
-    );
+    content = calibrationDone ? <CalibrationComplete /> : ["calibration", "daily"].includes(recommendations.stage) ? <SwipeExperience /> : <CatalogFeed />;
   else if (tab === "plan")
     content = (
       <>
