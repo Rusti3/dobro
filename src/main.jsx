@@ -32,12 +32,23 @@ import Garden from './Garden.jsx';
 // MAX Bridge is injected by the MAX client. The app still renders in a normal
 // browser for demo mode, where this value is undefined.
 const maxApp = window.WebApp;
+function maxInitData() {
+  // Official MAX launch parameters are duplicated in the URL fragment. Read
+  // them there as a fallback because some MAX WebView versions expose the
+  // fragment before Bridge.initData becomes available.
+  if (typeof window.WebApp?.initData === "string" && window.WebApp.initData)
+    return window.WebApp.initData;
+  const fragment = new URLSearchParams(window.location.hash.slice(1)).get("WebAppData");
+  if (fragment) return fragment;
+  return new URLSearchParams(window.location.search).get("WebAppData") || "";
+}
 async function api(url, method = "GET", body) {
+  const initData = maxInitData();
   const r = await fetch("/api" + url, {
     method,
     headers: {
       "Content-Type": "application/json",
-      ...(maxApp?.initData ? { "X-Max-Init-Data": maxApp.initData } : {}),
+      ...(initData ? { "X-Max-Init-Data": initData } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
