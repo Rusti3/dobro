@@ -4,7 +4,7 @@
   "framework": "vite",
   "functions": {
     "api/[[...path]].js": {
-      "includeFiles": ["russiantrustedca.pem", "data/catalog.json"]
+      "includeFiles": "{russiantrustedca.pem,data/catalog.json}"
     }
   },
   "rewrites": [
