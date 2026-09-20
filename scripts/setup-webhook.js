@@ -1,23 +1,15 @@
-import {telegramCall} from '../server/telegram.js';
-import {webhookSecret} from '../server/telegram-config.js';
+import { maxCall } from "../server/max.js";
 
-const token=process.env.TELEGRAM_BOT_TOKEN?.trim();
-const url=process.env.MINI_APP_URL?.trim().replace(/\/+$/,'');
-if(!token || !url?.startsWith('https://')) throw new Error('Set TELEGRAM_BOT_TOKEN and HTTPS MINI_APP_URL.');
-await telegramCall(token,'getMe',{});
-await telegramCall(token,'setWebhook',{
-  url:url+'/api/telegram',
-  secret_token:webhookSecret(token,process.env.TELEGRAM_WEBHOOK_SECRET),
-  allowed_updates:['message'],drop_pending_updates:false,
+const token = process.env.MAX_BOT_TOKEN?.trim();
+const url = process.env.MAX_WEBHOOK_URL?.trim().replace(/\/+$/, "");
+const secret = process.env.MAX_WEBHOOK_SECRET?.trim();
+if (!token || !url?.startsWith("https://") || !secret)
+  throw new Error("Укажите MAX_BOT_TOKEN, HTTPS MAX_WEBHOOK_URL и MAX_WEBHOOK_SECRET в .env.");
+try { await maxCall(token, "/subscriptions", { method: "DELETE", query: { url } }); } catch (error) {
+  if (!/404|not found/i.test(error.message)) throw error;
+}
+const result = await maxCall(token, "/subscriptions", {
+  method: "POST",
+  payload: { url, update_types: ["message_created", "bot_started"], secret },
 });
-await telegramCall(token,'setChatMenuButton',{menu_button:{type:'web_app',text:'Добро',web_app:{url}}});
-await telegramCall(token,'setMyCommands',{commands:[
-  {command:'start',description:'Открыть приложение'},
-  {command:'garden',description:'Сад добрых дел'},
-  {command:'plan',description:'Мой план'},
-  {command:'help',description:'Как всё устроено'},
-  {command:'stop',description:'Отключить напоминания'},
-  {command:'delete',description:'Удалить мои данные'},
-]});
-const info=await telegramCall(token,'getWebhookInfo',{});
-console.log(JSON.stringify({url:info.url,pending:info.pending_update_count,lastError:info.last_error_message||null}));
+console.log(JSON.stringify({ ok: true, url, update_types: result.update_types || ["message_created", "bot_started"] }, null, 2));

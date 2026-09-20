@@ -29,13 +29,15 @@ import {
 } from "lucide-react";
 import "./style.css";
 import Garden from './Garden.jsx';
-const tg = window.Telegram?.WebApp;
+// MAX Bridge is injected by the MAX client. The app still renders in a normal
+// browser for demo mode, where this value is undefined.
+const maxApp = window.WebApp;
 async function api(url, method = "GET", body) {
   const r = await fetch("/api" + url, {
     method,
     headers: {
       "Content-Type": "application/json",
-      ...(tg?.initData ? { "X-Telegram-Init-Data": tg.initData } : {}),
+      ...(maxApp?.initData ? { "X-Max-Init-Data": maxApp.initData } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -173,7 +175,7 @@ function App() {
     [swipeStart, setSwipeStart] = useState(null);
   const inviteCode =
     new URLSearchParams(location.search).get("invite") ||
-    tg?.initDataUnsafe?.start_param?.replace(/^i_/, "");
+    maxApp?.initDataUnsafe?.start_param?.replace(/^i_/, "");
   async function load() {
     try {
       const d = await api("/bootstrap");
@@ -187,8 +189,8 @@ function App() {
     }
   }
   useEffect(() => {
-    tg?.ready();
-    tg?.expand();
+    maxApp?.ready?.();
+    maxApp?.expand?.();
     load();
     if (inviteCode)
       api("/invites/" + inviteCode)
@@ -211,10 +213,10 @@ function App() {
       setSettings(false);
     };
     if (detail || onboard || settings || tab === "garden") {
-      tg?.BackButton?.show();
-      tg?.BackButton?.onClick(back);
-    } else tg?.BackButton?.hide();
-    return () => tg?.BackButton?.offClick(back);
+      maxApp?.BackButton?.show?.();
+      maxApp?.BackButton?.onClick?.(back);
+    } else maxApp?.BackButton?.hide?.();
+    return () => maxApp?.BackButton?.offClick?.(back);
   }, [tab, detail, onboard, settings, data?.user?.interestOnboarded]);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -278,7 +280,7 @@ function App() {
     await act(async () => {
       const { code } = await api(`/plans/${p.id}/invite`, "POST", {});
       const url = data.botUsername
-        ? `https://t.me/${data.botUsername}?start=i_${code}`
+        ? `https://max.ru/${data.botUsername}?startapp=i_${code}`
         : `${location.origin}/?invite=${code}`;
       setShare(url);
       await copy(url);
@@ -784,7 +786,7 @@ function App() {
             <>
               <p>{dateLabel(invite.when)}</p>
               <p className="notice">
-                Приняв приглашение, ты откроешь другу своё имя в Telegram.
+                Приняв приглашение, ты откроешь другу своё имя в MAX.
                 Точное место встречи станет доступно участникам. Регистрация на
                 ДОБРО остаётся отдельным шагом.
               </p>
@@ -821,7 +823,7 @@ function App() {
         <div className="settings-panel">
           <h3>Напоминание перед визитом</h3>
           <p>
-            Одно сообщение в Telegram за сутки или ближе к согласованному
+            Одно сообщение в MAX за сутки или ближе к согласованному
             времени. Включается только по твоему выбору.
           </p>
           <label className="checkbox-label">
@@ -833,7 +835,7 @@ function App() {
                 act(() => save({ reminders: e.target.checked }))
               }
             />
-            Напомнить в Telegram
+            Напомнить в MAX
           </label>
           {data.mode === "demo" && (
             <p className="small-text muted">

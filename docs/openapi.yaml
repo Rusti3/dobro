@@ -2,17 +2,24 @@ openapi: 3.0.3
 info:
   title: Первый шаг API
   version: 1.0.0
-  description: Same-origin API для Telegram Mini App; demo mode uses an HttpOnly local session.
+  description: Same-origin API для MAX Mini App; demo mode uses an HttpOnly local session.
 servers:
   - url: /
 security:
-  - telegramInitData: []
+  - maxInitData: []
 paths:
   /api/health:
     get:
       security: []
       responses:
         '200': {description: Service health}
+  /api/max/webhook:
+    post:
+      security: []
+      description: MAX Webhook endpoint; authenticated with X-Max-Bot-Api-Secret.
+      responses:
+        '200': {description: Update accepted}
+        '403': {description: Invalid webhook secret}
   /api/bootstrap:
     get:
       responses:
@@ -80,11 +87,11 @@ paths:
         '200': {description: User, plans and memberships deleted}
 components:
   securitySchemes:
-    telegramInitData:
+    maxInitData:
       type: apiKey
       in: header
-      name: X-Telegram-Init-Data
-      description: Telegram WebApp initData; server validates HMAC with bot token. Demo mode uses HttpOnly first_session instead.
+      name: X-Max-Init-Data
+      description: MAX WebApp.initData; server validates HMAC with MAX bot token. Demo mode uses HttpOnly first_session instead.
   schemas:
     ProfilePatch:
       type: object

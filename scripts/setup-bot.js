@@ -1,7 +1,12 @@
-import {telegramCall} from '../server/telegram.js';
-const token=process.env.TELEGRAM_BOT_TOKEN,url=process.env.MINI_APP_URL;
-if(!token||!url?.startsWith('https://'))throw new Error('Set TELEGRAM_BOT_TOKEN and HTTPS MINI_APP_URL in .env');
-await telegramCall(token,'deleteWebhook',{drop_pending_updates:false});
-await telegramCall(token,'setMyCommands',{commands:[{command:'start',description:'Сделать первый шаг'},{command:'plan',description:'Мой план'},{command:'garden',description:'Сад добрых дел'},{command:'help',description:'Как всё устроено'},{command:'stop',description:'Отключить напоминания'},{command:'delete',description:'Удалить мои данные'}]});
-await telegramCall(token,'setChatMenuButton',{menu_button:{type:'web_app',text:'Добро',web_app:{url}}});
-console.log('Bot commands and menu configured. Start exactly one server process for polling.');
+import { maxCall } from "../server/max.js";
+
+const token = process.env.MAX_BOT_TOKEN?.trim();
+if (!token) throw new Error("Укажите MAX_BOT_TOKEN в .env.");
+const info = await maxCall(token, "/me");
+console.log(`MAX-бот: ${info.first_name || info.name || "без имени"}`);
+console.log(`Username: ${info.username ? "@" + info.username : "не задан"}`);
+console.log(`ID: ${info.user_id ?? "неизвестен"}`);
+if (process.env.MAX_MINI_APP_URL && !process.env.MAX_MINI_APP_URL.startsWith("https://"))
+  throw new Error("MAX_MINI_APP_URL должен начинаться с https://.");
+console.log("Токен проверен. Ссылку Mini App укажите в настройках бота MAX.");
+console.log("Для production запустите npm run webhook:setup после публикации HTTPS-endpoint.");

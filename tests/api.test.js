@@ -7,7 +7,7 @@ import path from 'node:path';
 import {createStore} from '../server/store.js';
 test('Two-user invitation, ownership, persistence, revocation and deletion',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'first-step-'));const port=33000+Math.floor(Math.random()*2000);const db=path.join(dir,'test.sqlite');
- let child;const start=()=>{child=spawn(process.execPath,['server/index.js'],{cwd:path.resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),HOST:'127.0.0.1',DB_PATH:db,DEMO_MODE:'true',TELEGRAM_BOT_TOKEN:''},stdio:'pipe'});};start();
+ let child;const start=()=>{child=spawn(process.execPath,['server/index.js'],{cwd:path.resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),HOST:'127.0.0.1',DB_PATH:db,DEMO_MODE:'true',MAX_BOT_TOKEN:''},stdio:'pipe'});};start();
  t.after(()=>{child?.kill();});
  const base=`http://127.0.0.1:${port}`;const wait=async()=>{for(let n=0;n<80;n++){try{if((await fetch(base+'/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server did not start');};await wait();
  const client=()=>{let cookie='';return async(url,method='GET',body)=>{const r=await fetch(base+'/api'+url,{method,headers:{'Content-Type':'application/json',Cookie:cookie},...(body?{body:JSON.stringify(body)}:{})});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};};};

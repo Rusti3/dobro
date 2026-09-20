@@ -4,9 +4,9 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
-import { botReply, telegramUser } from "../server/domain.js";
+import { botReply, maxUser } from "../server/domain.js";
+import { appButton, maxCall } from "../server/max.js";
 import { validateHours } from '../server/garden.js';
-import { webhookSecret } from '../server/telegram-config.js';
 import { recommendationView, recordFeedback, resetRecommendation, themeIds } from '../server/recommendation.js';
 
 const catalog = JSON.parse(
@@ -53,15 +53,15 @@ function parseCookie(req, name) {
   );
 }
 function verifyInit(raw, token) {
-  if (!token?.trim()) fail('На сервере не настроен TELEGRAM_BOT_TOKEN. Добавьте его в Vercel и выполните Redeploy.', 503);
+  if (!token?.trim()) fail('На сервере не настроен MAX_BOT_TOKEN. Добавьте его в Vercel и выполните Redeploy.', 503);
   let u;
-  try { u = telegramUser(raw, token.trim()); } catch(e) { fail(e.message,401); }
-  return { id: `tg:${u.id}`, name: u.first_name || "Друг", chatId: u.id };
+  try { u = maxUser(raw, token.trim()); } catch(e) { fail(e.message,401); }
+  return { id: `max:${u.id}`, name: u.first_name || "Друг", chatId: u.id };
 }
 function user(req, res) {
-  const init = req.headers["x-telegram-init-data"];
+  const init = req.headers["x-max-init-data"];
   let u;
-  if (init) u = verifyInit(init, process.env.TELEGRAM_BOT_TOKEN);
+  if (init) u = verifyInit(init, process.env.MAX_BOT_TOKEN);
   else if (process.env.DEMO_MODE === "true") {
     let s = parseCookie(req, "first_session");
     if (!s) {
@@ -80,7 +80,7 @@ function user(req, res) {
       interestOnboarded: false,
       onboarded: false,
     };
-  } else fail("Откройте приложение из Telegram.", 401);
+  } else fail("Откройте приложение из MAX.", 401);
   const existing = memory.users.get(u.id);
   const complete = {
     profile: {city:'Москва',category:'all',barrier:'company',interests:[]},
@@ -130,44 +130,41 @@ function plansFor(u) {
     .filter((p) => p.owner === u.id || p.members.some((m) => m.id === u.id))
     .map((p) => safePlan(p, u));
 }
-async function telegram(method, data) {
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (!token) fail('На сервере не настроен TELEGRAM_BOT_TOKEN.',503);
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-    signal: AbortSignal.timeout(10000),
-  });
-  const result = await response.json();
-  if(!result.ok) fail(`Telegram не принял ответ бота (код ${result.error_code}). Проверьте токен и MINI_APP_URL.`,502);
-}
 async function webhook(req, res) {
   if (req.method !== "POST")
     return json(res, 405, { error: "Метод не поддерживается." });
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if(!token) fail('На сервере не настроен TELEGRAM_BOT_TOKEN.',503);
-  const secret = webhookSecret(token, process.env.TELEGRAM_WEBHOOK_SECRET);
-  if (req.headers["x-telegram-bot-api-secret-token"] !== secret)
+  const token = process.env.MAX_BOT_TOKEN?.trim();
+  if(!token) fail('На сервере не настроен MAX_BOT_TOKEN.',503);
+  const secret = process.env.MAX_WEBHOOK_SECRET?.trim();
+  if (!secret || req.headers["x-max-bot-api-secret"] !== secret)
     return json(res, 403, { error: "Forbidden" });
   const update = await readBody(req);
-  const m = update.message;
-  if (m?.chat?.type === "private" && m.from && !m.from.is_bot) {
-    const id = `tg:${m.from.id}`;
+  const message = update.message || (update.update_type === "bot_started" && update.user
+    ? { sender: update.user, recipient: { user_id: update.user.user_id } }
+    : null);
+  const sender = message?.sender;
+  if (sender?.user_id != null && !sender.is_bot) {
+    const recipient = message.recipient || {};
+    const destination = recipient.chat_id != null
+      ? { kind: "chat_id", id: recipient.chat_id }
+      : { kind: "user_id", id: sender.user_id };
+    const id = `max:${sender.user_id}`;
     const u = memory.users.get(id) || {
       id,
-      name: m.from.first_name || "Друг",
+      name: sender.first_name || "Друг",
       profile: { city: "Москва", category: "all", barrier: "company", interests: [] },
       reminders: false,
-      chatId: m.chat.id,
+      chatId: destination.id,
     };
-    u.chatId = m.chat.id;
+    u.chatId = destination.id;
     memory.users.set(id, u);
-    const text = m.text || "";
+    const text = message.body?.text || "";
     const cmd = text.split(/[ @]/)[0];
     let reply = botReply(text, u.name),
-      url = process.env.MINI_APP_URL?.trim().replace(/\/+$/, '') || "";
-    if(!url.startsWith('https://')) fail('Настройте HTTPS MINI_APP_URL в Vercel.',503);
+      payload = "";
+    const appUrl = process.env.MAX_MINI_APP_URL?.trim().replace(/\/+$/, '') || "";
+    const botUsername = process.env.MAX_BOT_USERNAME?.trim().replace(/^@/, '') || "";
+    if(!appUrl.startsWith('https://')) fail('Настройте HTTPS MAX_MINI_APP_URL в Vercel.',503);
     if (cmd === "/plan") {
       const p = plansFor(u).find(
         (p) => !["cancelled", "done"].includes(p.status),
@@ -175,7 +172,7 @@ async function webhook(req, res) {
       reply = p
         ? `Твой план: ${p.event.short}. ${p.when ? "Дата: " + new Date(p.when).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) : "Дата пока не согласована"}.`
         : "Пока нет активного плана.";
-      url += "/?tab=plan";
+      payload = "tab_plan";
     }
     if (cmd === "/stop") {
       u.reminders = false;
@@ -183,7 +180,7 @@ async function webhook(req, res) {
     }
     if (cmd === "/garden") {
       reply = "Твой сад хранит истории добрых дел. Открой его, чтобы увидеть растения и выбрать следующий шаг.";
-      url += "/?tab=garden";
+      payload = "tab_garden";
     }
     if (cmd === "/delete") {
       memory.users.delete(id);
@@ -192,20 +189,22 @@ async function webhook(req, res) {
         else p.members = p.members.filter((v) => v.id !== id);
       }
     }
-    const invite = text.match(/^\/start(?:@\w+)? i_([a-f0-9]{36})$/)?.[1];
-    if (invite) url += `/?invite=${invite}`;
-    await telegram("sendMessage", {
-      chat_id: m.chat.id,
-      text: reply,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: invite ? "Открыть приглашение" : "Открыть «Первый шаг»",
-              web_app: { url },
-            },
-          ],
-        ],
+    const invite = text.match(/^\/start(?:@\w+)?[ _]i_([a-f0-9]{36})$/i)?.[1];
+    if (invite) payload = `i_${invite}`;
+    await maxCall(token, "/messages", {
+      method: "POST",
+      query: { [destination.kind]: destination.id },
+      payload: {
+        text: reply,
+        attachments: [{
+          type: "inline_keyboard",
+          payload: { buttons: [[appButton({
+            text: invite ? "Открыть приглашение" : "Открыть «Первый шаг»",
+            botUsername,
+            appUrl,
+            payload,
+          })]] },
+        }],
       },
     });
   }
@@ -215,11 +214,11 @@ export default async function handler(req, res) {
   try {
     const pathname = new URL(req.url, `https://${req.headers.host || "vercel"}`)
       .pathname;
-    if (pathname === "/api/telegram") return await webhook(req, res);
+    if (pathname === "/api/max/webhook") return await webhook(req, res);
     if (pathname === "/api/health")
       return json(res, 200, {
         ok: true,
-        mode: process.env.DEMO_MODE === "true" ? "demo" : "telegram",
+        mode: process.env.DEMO_MODE === "true" ? "demo" : "max",
       });
     const u = user(req, res);
     const method = req.method;
@@ -232,8 +231,8 @@ export default async function handler(req, res) {
         plans: plansFor(u),
         catalog,
         recommendations,
-        mode: process.env.DEMO_MODE === "true" ? "demo" : "telegram",
-        botUsername: process.env.BOT_USERNAME || null,
+        mode: process.env.DEMO_MODE === "true" ? "demo" : "max",
+        botUsername: process.env.MAX_BOT_USERNAME || null,
       });
     }
     if (pathname === "/api/profile" && method === "PATCH") {

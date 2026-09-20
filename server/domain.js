@@ -1,14 +1,43 @@
 import {createHmac,timingSafeEqual} from 'node:crypto';
-export function telegramUser(raw, token, now=Date.now()) {
- const q=new URLSearchParams(raw); const hash=q.get('hash'); q.delete('hash');
- if(!token||!hash||!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Откройте приложение заново из Telegram.');
- const age=now/1000-Number(q.get('auth_date')); if(!Number.isFinite(age)||age< -30||age>3600) throw new Error('Сессия истекла. Откройте приложение заново.');
- const data=[...q.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k}=${v}`).join('\n');
- const key=createHmac('sha256','WebAppData').update(token).digest();
- const expected=createHmac('sha256',key).update(data).digest();
- if(!timingSafeEqual(expected,Buffer.from(hash,'hex'))) throw new Error('Не удалось подтвердить Telegram-сессию.');
- const u=JSON.parse(q.get('user')||'{}'); if(!Number.isSafeInteger(u.id)||u.id<=0) throw new Error('Нет пользователя Telegram.'); return u;
+
+/**
+ * Validate MAX Bridge WebApp.initData according to the official MAX rules.
+ * The client must send the value of window.WebApp.initData verbatim in
+ * X-Max-Init-Data. initDataUnsafe is deliberately never trusted.
+ */
+export function maxUser(raw, token, now=Date.now()) {
+ if(typeof raw !== 'string' || !token?.trim()) throw new Error('Откройте приложение из MAX ещё раз.');
+ // Some bridge versions expose the complete URL-fragment wrapper. Accept it
+ // while still validating the inner WebAppData string exactly as documented.
+ if(raw.startsWith('WebAppData=')) {
+   const wrapper=new URLSearchParams(raw);
+   raw=wrapper.get('WebAppData') || '';
+ }
+ const pairs=raw.split('&').filter(Boolean).map(part=>{
+   const at=part.indexOf('=');
+   if(at<1) throw new Error('Некорректные данные запуска MAX.');
+   return [part.slice(0,at),decodeURIComponent(part.slice(at+1))];
+ });
+ if(pairs.some(([key])=>key==='hash') && pairs.filter(([key])=>key==='hash').length!==1)
+   throw new Error('Некорректная подпись MAX.');
+ const hash=pairs.find(([key])=>key==='hash')?.[1];
+ if(!hash || !/^[a-f0-9]{64}$/i.test(hash)) throw new Error('Откройте приложение из MAX ещё раз.');
+ if(new Set(pairs.map(([key])=>key)).size!==pairs.length) throw new Error('Некорректные данные запуска MAX.');
+ const q=new Map(pairs); q.delete('hash');
+ const age=now/1000-Number(q.get('auth_date'));
+ if(!Number.isFinite(age)||age < -30 || age > 3600) throw new Error('Сессия MAX истекла. Откройте приложение заново.');
+ const data=[...q.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([key,value])=>`${key}=${value}`).join('\n');
+ const secret=createHmac('sha256','WebAppData').update(token.trim()).digest();
+ const expected=createHmac('sha256',secret).update(data).digest();
+ const actual=Buffer.from(hash,'hex');
+ if(actual.length!==expected.length || !timingSafeEqual(expected,actual)) throw new Error('Не удалось подтвердить MAX-сессию.');
+ let u;
+ try { u=JSON.parse(q.get('user')||'{}'); } catch { throw new Error('В данных MAX нет пользователя.'); }
+ const id=String(u?.id ?? '');
+ if(!/^\d+$/.test(id)||BigInt(id)<=0n) throw new Error('В данных MAX нет пользователя.');
+ return {...u,id};
 }
+
 export function validatePlan(input,event,now=Date.now()) {
  if(!event||Date.parse(event.endsAt)<now) throw new Error('Событие завершилось. Выберите другое дело.');
  const when=input.when||null;

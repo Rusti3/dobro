@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createStore } from "./store.js";
-import { telegramUser, validatePlan } from "./domain.js";
-import { startBot } from "./telegram.js";
+import { maxUser, validatePlan } from "./domain.js";
+import { startPolling, startReminderLoop, processUpdate } from "./max.js";
 import { validateHours } from './garden.js';
 import { recommendationView, recordFeedback, resetRecommendation, themeIds } from './recommendation.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,10 +17,15 @@ const catalog = JSON.parse(
 );
 const dev = process.argv.includes("--dev");
 const demo = process.env.DEMO_MODE !== "false";
-const token = process.env.TELEGRAM_BOT_TOKEN;
-const appUrl = process.env.MINI_APP_URL || "";
-if (token && (!appUrl.startsWith("https://") || demo))
-  throw new Error("Telegram requires HTTPS MINI_APP_URL and DEMO_MODE=false.");
+const token = process.env.MAX_BOT_TOKEN;
+const appUrl = (process.env.MAX_MINI_APP_URL || "").trim().replace(/\/+$/, "");
+const botUsername = process.env.MAX_BOT_USERNAME || "";
+const webhookUrl = process.env.MAX_WEBHOOK_URL || "";
+if (!demo && !token) throw new Error("MAX_BOT_TOKEN обязателен при DEMO_MODE=false.");
+if (token && !demo && (!appUrl.startsWith("https://") || !botUsername))
+  throw new Error("MAX production requires HTTPS MAX_MINI_APP_URL and MAX_BOT_USERNAME.");
+if (webhookUrl && !process.env.MAX_WEBHOOK_SECRET)
+  throw new Error("MAX_WEBHOOK_SECRET обязателен при использовании Webhook.");
 const vite = dev
   ? await (
       await import("vite")
@@ -50,12 +55,12 @@ async function body(req) {
 }
 function user(req, res) {
   let id, name;
-  const init = req.headers["x-telegram-init-data"];
+  const init = req.headers["x-max-init-data"];
   if (init) {
     try {
-      const u = telegramUser(init, token);
-      id = `tg:${u.id}`;
-      name = u.first_name;
+      const u = maxUser(init, token);
+      id = `max:${u.id}`;
+      name = u.first_name || "Друг";
     } catch (e) {
       fail(e.message, 401);
     }
@@ -72,7 +77,7 @@ function user(req, res) {
     }
     id = `demo:${session}`;
     name = "Друг";
-  } else fail("Откройте приложение из Telegram.", 401);
+  } else fail("Откройте приложение из MAX.", 401);
   let u = store.user(id);
   if (!u) {
     u = {
@@ -126,6 +131,7 @@ const server = http.createServer(async (req, res) => {
         ".css": "text/css",
         ".jpg": "image/jpeg",
         ".png": "image/png",
+        ".webp": "image/webp",
         ".svg": "image/svg+xml",
         ".woff2": "font/woff2",
       };
@@ -136,7 +142,16 @@ const server = http.createServer(async (req, res) => {
       return fs.createReadStream(file).pipe(res);
     }
     if (url.pathname === "/api/health")
-      return json(res, 200, { ok: true, mode: demo ? "demo" : "telegram" });
+      return json(res, 200, { ok: true, mode: demo ? "demo" : "max", transport: webhookUrl ? "webhook" : "polling" });
+    if (url.pathname === "/api/max/webhook") {
+      if (req.method !== "POST") return json(res, 405, { error: "Метод не поддерживается." });
+      const expected = process.env.MAX_WEBHOOK_SECRET || "";
+      if (!expected || req.headers["x-max-bot-api-secret"] !== expected)
+        return json(res, 403, { error: "Forbidden" });
+      const update = await body(req);
+      await processUpdate({ token, update, appUrl, botUsername, store, catalog });
+      return json(res, 200, { ok: true });
+    }
     if (!["GET", "POST", "PATCH", "DELETE"].includes(req.method))
       fail("Метод не поддерживается.", 405);
     if (req.method !== "GET") {
@@ -145,7 +160,9 @@ const server = http.createServer(async (req, res) => {
         origin &&
         origin !== `http://${req.headers.host}` &&
         origin !== `https://${req.headers.host}` &&
-        origin !== appUrl
+        origin !== appUrl &&
+        origin !== "https://max.ru" &&
+        origin !== "https://web.max.ru"
       )
         fail("Недопустимый источник запроса.", 403);
       if (!req.headers["content-type"]?.startsWith("application/json"))
@@ -170,8 +187,8 @@ const server = http.createServer(async (req, res) => {
         plans: mine(u),
         catalog,
         recommendations,
-        mode: demo ? "demo" : "telegram",
-        botUsername: process.env.BOT_USERNAME || null,
+         mode: demo ? "demo" : "max",
+         botUsername: botUsername || null,
       });
     }
     if (url.pathname === "/api/profile" && req.method === "PATCH") {
@@ -341,9 +358,15 @@ server.listen(
   process.env.HOST || "127.0.0.1",
   () =>
     console.log(
-      `Первый шаг: http://${process.env.HOST || "127.0.0.1"}:${process.env.PORT || 3210} (${demo ? "demo" : "telegram"})`,
+      `Первый шаг MAX: http://${process.env.HOST || "127.0.0.1"}:${process.env.PORT || 3210} (${demo ? "demo" : "max"})`,
     ),
 );
-if (token) startBot({ token, appUrl, store, catalog });
+if (token) {
+  startReminderLoop({ token, appUrl, botUsername, store, catalog });
+  // MAX Webhook is configured by scripts/setup-webhook.js. Long Polling is
+  // intentionally opt-in for local development and must not run with a webhook.
+  if (process.env.MAX_POLLING === "true" || (!webhookUrl && process.env.MAX_POLLING !== "false"))
+    startPolling({ token, appUrl, botUsername, store, catalog }).catch((error) => console.error(error));
+}
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => server.close(() => process.exit(0)));
