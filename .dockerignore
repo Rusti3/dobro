@@ -24,5 +24,7 @@
 !data/
 !data/catalog.json
 !data/demo-themes.json
+!docs/
+!docs/openapi.yaml
 !russiantrustedca.pem
 !Dockerfile

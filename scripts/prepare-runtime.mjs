@@ -5,6 +5,8 @@ const out='/release';
 fs.mkdirSync(path.join(out,'scripts'),{recursive:true});
 for(const name of ['dist','server','shared','schemas','config','data','package.json','package-lock.json','russiantrustedca.pem'])
   fs.cpSync(name,path.join(out,name),{recursive:true});
+fs.mkdirSync(path.join(out,'docs'),{recursive:true});
+fs.cpSync(path.join('docs','openapi.yaml'),path.join(out,'docs','openapi.yaml'));
 for(const name of ['lib','setup-bot.js','setup-webhook.js'])
   fs.cpSync(path.join('scripts',name),path.join(out,'scripts',name),{recursive:true});
 const {packages}=JSON.parse(fs.readFileSync('package-lock.json','utf8'));

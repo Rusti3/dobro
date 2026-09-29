@@ -12,6 +12,8 @@ docker compose up -d --build
 
 Открыть [localhost:3210](http://localhost:3210). Проверка сервиса: [localhost:3210/api/health](http://localhost:3210/api/health). Первый запуск создаёт БД, применяет миграции и добавляет тестовые данные.
 
+`GET /api` открывает Swagger UI; `/api/openapi.yaml` и `/api/index.json` доступны без MAX для просмотра контракта. Личные методы по-прежнему требуют подписанные данные MAX; локальное Docker-демо использует отдельную cookie-сессию.
+
 ## Состав
 
 - `app`: Node.js 24, HTTP API и собранный React-интерфейс. MAX Bridge передаёт подписанные данные запуска.

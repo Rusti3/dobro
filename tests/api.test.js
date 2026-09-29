@@ -26,6 +26,19 @@ test('PostgreSQL API: complete demo journey, ownership, idempotency, intro and r
   }
   t.after(stop);
   await start();
+  const apiIndex=await fetch(base+'/api');
+  assert.equal(apiIndex.status,200);
+  assert.match(apiIndex.headers.get('content-type'),/text\/html/);
+  assert.match(await apiIndex.text(),/swagger-ui-bundle\.js/);
+  const apiIndexData=await (await fetch(base+'/api/index.json')).json();
+  assert.equal(apiIndexData.openapi,'/api/openapi.yaml');
+  assert.equal((await fetch(base+'/api/')).status,200);
+  assert.equal((await fetch(base+'/api/swagger-ui/swagger-ui-bundle.js')).status,200);
+  assert.equal((await fetch(base+'/api/swagger-ui/swagger-ui.css')).status,200);
+  const openapi=await fetch(base+'/api/openapi.yaml');
+  assert.equal(openapi.status,200);
+  assert.match(await openapi.text(),/openapi: 3\.0\.3/);
+  assert.equal((await fetch(base+'/api', {method:'POST'})).status,405);
   const result=await checkDemoApi(base,{restart:async()=>{await stop();await start();}});
   assert.equal(result.completed,1);assert.equal(result.calibration,6);
 });

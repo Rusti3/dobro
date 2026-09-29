@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import swaggerUiDist from "swagger-ui-dist";
 import { createStore } from "./store.js";
 import { createPool, databaseHealth, runMigrations } from "./database.js";
 import { createCatalogRepository } from "./catalog-repository.js";
@@ -16,6 +17,7 @@ import { loadRecommendationContext } from './recommendation-context.js';
 import { migratePrivateData, requirePrivateDataKey } from './private-data.js';
 import { demoDataEnabled, seedDemoCatalog, seedDemoPlan } from './demo-data.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const swaggerAssets = swaggerUiDist.getAbsoluteFSPath();
 const pool = createPool({ applicationName: "dobrie_dela_web" });
 await runMigrations(pool);
 if (process.env.REQUIRE_PRIVATE_DATA_ENCRYPTION === "true" || (process.env.NODE_ENV === "production" && process.env.DEMO_MODE === "false")) requirePrivateDataKey();
@@ -150,7 +152,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
       res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://st.max.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self' https://web.max.ru; form-action 'self'");
     }
-    if (!url.pathname.startsWith("/api/")) {
+    if (url.pathname !== "/api" && !url.pathname.startsWith("/api/")) {
       if (vite) return vite.middlewares(req, res);
       let file = path.join(root, "dist", decodeURIComponent(url.pathname));
       if (
@@ -178,6 +180,37 @@ const server = http.createServer(async (req, res) => {
         types[path.extname(file)] || "application/octet-stream",
       );
       return fs.createReadStream(file).pipe(res);
+    }
+    if (url.pathname === "/api" || url.pathname === "/api/") {
+      if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>хелпи API</title><link rel="stylesheet" href="/api/swagger-ui/swagger-ui.css"><style>body{margin:0;background:#fafafa;color:#17212b;font-family:system-ui,sans-serif}.api-note{padding:14px 24px;background:#e9f5ed;border-bottom:1px solid #b6d5bd}.api-note a{color:#146c38}.api-note p{margin:6px 0 0}</style></head><body><div class="api-note"><strong>хелпи API</strong> · <a href="/api/health">Проверить работу</a> · <a href="/api/openapi.yaml">OpenAPI YAML</a><p>Документация открыта вне MAX. Личные методы требуют подписанные данные запуска MAX; без них запросы вернут 401.</p></div><div id="swagger-ui"></div><script src="/api/swagger-ui/swagger-ui-bundle.js"></script><script src="/api/swagger-ui/init.js"></script></body></html>`);
+    }
+    if (url.pathname === "/api/index.json") {
+      if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
+      return json(res, 200, {
+        name: "хелпи API",
+        version: process.env.APP_COMMIT || "local",
+        openapi: "/api/openapi.yaml",
+        health: "/api/health",
+        authentication: "Личные методы требуют подписанные данные запуска MAX в заголовке X-Max-Init-Data. Локальное Docker-демо использует отдельную cookie-сессию.",
+      });
+    }
+    if (url.pathname.startsWith("/api/swagger-ui/")) {
+      if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
+      const asset = url.pathname.slice("/api/swagger-ui/".length);
+      if (asset === "init.js") {
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" });
+        return res.end("window.onload=function(){SwaggerUIBundle({url:'/api/openapi.yaml',dom_id:'#swagger-ui',deepLinking:true,validatorUrl:null,presets:[SwaggerUIBundle.presets.apis]});};");
+      }
+      if (!["swagger-ui-bundle.js", "swagger-ui.css"].includes(asset)) return json(res, 404, { error: "Не найдено." });
+      res.writeHead(200, { "Content-Type": asset.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" });
+      return fs.createReadStream(path.join(swaggerAssets, asset)).pipe(res);
+    }
+    if (url.pathname === "/api/openapi.yaml") {
+      if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
+      res.writeHead(200, { "Content-Type": "application/yaml; charset=utf-8", "Cache-Control": "public, max-age=3600" });
+      return fs.createReadStream(path.join(root, "docs", "openapi.yaml")).pipe(res);
     }
     if (url.pathname === "/api/health") {
       const [database, catalog, workerHeartbeat, lastCatalogSync, lastAnnotationBatch] = await Promise.all([

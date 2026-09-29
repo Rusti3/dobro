@@ -24,10 +24,12 @@
     "webhook:setup": "node --env-file-if-exists=.env scripts/setup-webhook.js",
     "test:demo": "node scripts/test-demo-api.mjs",
     "test:ui": "node scripts/test-garden-ui.mjs",
+    "test:api-docs": "node scripts/test-swagger-ui.mjs",
     "secrets:check": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "swagger-ui-dist": "5.33.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

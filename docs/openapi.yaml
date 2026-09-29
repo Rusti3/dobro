@@ -1,13 +1,51 @@
 openapi: 3.0.3
 info:
   title: хелпи API
-  version: 2026.09.29
-  description: Same-origin API для MAX Mini App; demo mode uses an HttpOnly local session.
+  version: 2026.09.30
+  description: API мини-приложения MAX. Публичны документация и проверка работы; личные методы требуют подпись MAX. Локальное демо использует отдельную HttpOnly cookie-сессию.
 servers:
   - url: /
 security:
   - maxInitData: []
 paths:
+  /api:
+    get:
+      security: []
+      description: Public Swagger UI. Personal endpoints still require MAX authentication.
+      responses:
+        '200':
+          description: Interactive API documentation
+          content:
+            text/html:
+              schema: {type: string}
+  /api/index.json:
+    get:
+      security: []
+      description: Machine-readable public API entry point
+      responses:
+        '200':
+          description: API version, documentation and health links
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, openapi, health, authentication]
+                properties:
+                  name: {type: string}
+                  version: {type: string}
+                  openapi: {type: string}
+                  health: {type: string}
+                  authentication: {type: string}
+  /api/openapi.yaml:
+    get:
+      security: []
+      description: Public OpenAPI 3.0 specification
+      responses:
+        '200':
+          description: OpenAPI YAML document
+          content:
+            application/yaml:
+              schema: {type: string}
   /api/health:
     get:
       security: []
