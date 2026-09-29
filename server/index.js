@@ -144,11 +144,11 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("X-Frame-Options", "DENY");
+    // MAX web embeds mini-apps; CSP below restricts permitted parent origins.
     res.setHeader("Permissions-Policy", "geolocation=(self), camera=(), microphone=()");
     if (process.env.NODE_ENV === "production") {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://st.max.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://st.max.ru; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self' https://web.max.ru; form-action 'self'");
     }
     if (!url.pathname.startsWith("/api/")) {
       if (vite) return vite.middlewares(req, res);
