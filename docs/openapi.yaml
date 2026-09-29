@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
-  title: Первый шаг API
-  version: 1.0.0
+  title: хелпи API
+  version: 2026.09.29
   description: Same-origin API для MAX Mini App; demo mode uses an HttpOnly local session.
 servers:
   - url: /
@@ -23,7 +23,10 @@ paths:
   /api/bootstrap:
     get:
       responses:
-        '200': {description: Current user, plans and curated catalog}
+        '200':
+          description: Current user, plans, location and curated catalog
+          content:
+            application/json: {schema: {$ref: '#/components/schemas/Bootstrap'}}
   /api/profile:
     patch:
       requestBody:
@@ -33,6 +36,46 @@ paths:
             schema: {$ref: '#/components/schemas/ProfilePatch'}
       responses:
         '200': {description: Saved profile}
+  /api/garden/intro-seen:
+    post:
+      description: Atomically marks the authenticated account's garden intro seen. Repeated calls are safe; profile saves cannot reset this flag.
+      responses:
+        '200': {description: Saved, content: {application/json: {schema: {type: object, required: [seen], properties: {seen: {type: boolean, enum: [true]}}}}}}
+        '401': {description: Invalid or absent MAX authentication}
+  /api/events/{eventId}:
+    get:
+      description: Opens an active age-eligible event from the daily MAX digest, including events outside the selected city.
+      parameters:
+        - {name: eventId, in: path, required: true, schema: {type: string, pattern: '^[a-zA-Z0-9_-]+$'}}
+      responses:
+        '200': {description: Public event card without private annotations}
+        '404': {description: Event unavailable or age-ineligible}
+  /api/location:
+    get:
+      description: Returns the saved voluntary point without consuming or extending it.
+      responses:
+        '200': {description: Current point and request status, content: {application/json: {schema: {$ref: '#/components/schemas/LocationResponse'}}}}
+    post:
+      description: Saves a browser-provided point for 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LocationPoint'}
+      responses:
+        '200': {description: Saved point, content: {application/json: {schema: {$ref: '#/components/schemas/LocationResponse'}}}}
+        '400': {description: Invalid coordinates}
+    delete:
+      description: Deletes the saved point before its expiry.
+      responses:
+        '200': {description: Point deleted}
+  /api/location/request:
+    post:
+      description: Asks the MAX bot to request the user's location. The user must approve it in MAX.
+      responses:
+        '200': {description: Request sent or already pending}
+        '403': {description: Not running inside MAX}
+        '502': {description: MAX request failed}
   /api/plans:
     post:
       requestBody:
@@ -44,12 +87,15 @@ paths:
               required: [eventId]
               properties:
                 eventId: {type: string}
+                selectedVacancyId: {type: string, nullable: true}
                 mode: {type: string, enum: [friend, solo]}
                 when: {type: string, format: date-time, nullable: true}
                 meeting: {type: string, maxLength: 240}
       responses:
         '201': {description: Created personal plan}
+        '200': {description: Existing open personal plan, including concurrent retries}
         '400': {description: Validation error}
+        '403': {description: Event is unavailable for the profile or age}
   /api/plans/{id}:
     patch:
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
@@ -60,6 +106,8 @@ paths:
       responses:
         '200': {description: Updated plan}
         '403': {description: Only owner can edit}
+        '400': {description: Completion requires elapsed agreed date, confirmation and reflection}
+        '409': {description: Concurrent request already closed this plan}
   /api/plans/{id}/invite:
     post:
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
@@ -81,6 +129,41 @@ paths:
       parameters: [{name: code, in: path, required: true, schema: {type: string, minLength: 36}}]
       responses:
         '200': {description: Joined plan}
+        '403': {description: Age or registration restriction}
+  /api/recommendations/feedback:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, action, context]
+              properties:
+                eventId: {type: string}
+                selectedVacancyId: {type: string, nullable: true}
+                action: {type: string, enum: [like, skip]}
+                context: {type: string, enum: [calibration, daily]}
+      responses:
+        '200': {description: Updated recommendation state}
+        '400': {description: Invalid action}
+  /api/recommendations/signals:
+    post:
+      description: Records one idempotent detail-opening signal; view time and scroll are not tracked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventId, action]
+              properties:
+                eventId: {type: string}
+                selectedVacancyId: {type: string, nullable: true}
+                action: {type: string, enum: [open_detail]}
+      responses:
+        '200': {description: Signal recorded}
+        '404': {description: Event is no longer available}
   /api/me:
     delete:
       responses:
@@ -96,9 +179,19 @@ components:
     ProfilePatch:
       type: object
       properties:
+        city: {type: string, enum: [Москва, Санкт-Петербург, Казань, Рыбинск]}
+        interests: {type: array, maxItems: 14, items: {type: string}}
+        age: {type: integer, minimum: 7, maximum: 100, description: Optional age collected after calibration; does not reset recommendations.}
+        registration:
+          type: object
+          required: [name, age]
+          properties:
+            name: {type: string, minLength: 2, maxLength: 60}
+            age: {type: integer, minimum: 7, maximum: 100}
         category: {type: string, enum: [all, animals, people]}
         barrier: {type: string, enum: [company, unknown, time]}
         reminders: {type: boolean}
+        dailyDigest: {type: boolean, description: Receive a daily recommendation message in MAX}
     PlanPatch:
       type: object
       properties:
@@ -108,3 +201,29 @@ components:
         checks: {type: array, items: {type: string, enum: [contact, route, bag]}}
         status: {type: string, enum: [done, cancelled]}
         reflection: {type: string, enum: [warm, okay, hard]}
+        hours: {type: number, minimum: 0, maximum: 24, multipleOf: 0.5}
+    LocationPoint:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat: {type: number, minimum: -90, maximum: 90}
+        lng: {type: number, minimum: -180, maximum: 180}
+    LocationResponse:
+      type: object
+      required: [location, pending]
+      properties:
+        location:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/LocationPoint'}]
+          description: Point and expiry; omitted from history and encrypted at rest.
+        pending: {type: boolean}
+    Bootstrap:
+      type: object
+      required: [user, plans, catalog, recommendations, location, mode]
+      properties:
+        user: {type: object, properties: {gardenIntroSeen: {type: boolean}}}
+        plans: {type: array, items: {type: object}}
+        catalog: {type: array, items: {type: object}}
+        recommendations: {type: object}
+        location: {nullable: true, type: object}
+        mode: {type: string, enum: [demo, max]}

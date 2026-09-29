@@ -1,0 +1,67 @@
+services:
+  postgres:
+    environment:
+      POSTGRES_INITDB_ARGS: --data-checksums --auth-host=scram-sha-256
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_min_protocol_version=TLSv1.2", "-c", "ssl_cert_file=/run/postgres-tls/server.crt", "-c", "ssl_key_file=/run/postgres-tls/server.key", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    volumes:
+      - ./secrets/postgres-tls:/run/postgres-tls:ro
+      - ./deploy/postgres-pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+  app:
+    image: ${APP_IMAGE:-helpi:v2026.09.29}
+    environment:
+      DEMO_MODE: "false"
+      DEMO_DATA: "false"
+      CATALOG_SYNC_ENABLED: "true"
+      CATALOG_SYNC_ON_START: "true"
+      CATALOG_ANNOTATED_ONLY: "true"
+      ANNOTATION_ENABLED: "false"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      DB_TLS_CA_FILE: /run/postgres-tls/ca.crt
+      REQUIRE_PRIVATE_DATA_ENCRYPTION: "true"
+      PRIVATE_DATA_ENCRYPTION_KEY_FILE: /run/secrets/private-data.key
+    secrets:
+      - source: private_data_key
+        target: private-data.key
+    volumes:
+      - ./secrets/postgres-tls/ca.crt:/run/postgres-tls/ca.crt:ro
+  worker:
+    image: ${APP_IMAGE:-helpi:v2026.09.29}
+    environment:
+      DEMO_MODE: "false"
+      DEMO_DATA: "false"
+      CATALOG_SYNC_ENABLED: "true"
+      CATALOG_SYNC_ON_START: "false"
+      REQUIRE_PRIVATE_DATA_ENCRYPTION: "true"
+      ANNOTATION_ENABLED: "false"
+      CATALOG_ANNOTATED_ONLY: "true"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      DB_TLS_CA_FILE: /run/postgres-tls/ca.crt
+      PRIVATE_DATA_ENCRYPTION_KEY_FILE: /run/secrets/private-data.key
+    secrets:
+      - source: private_data_key
+        target: private-data.key
+    volumes:
+      - ./secrets/postgres-tls/ca.crt:/run/postgres-tls/ca.crt:ro
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  private_data_key:
+    file: ./secrets/private-data.key

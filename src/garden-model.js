@@ -31,3 +31,9 @@ export function gardenFor(plans, userId) {
     seedlings:own.filter(p => !['done','cancelled'].includes(p.status)),
     rare:completed.length >= 3, bench:completed.length >= 5, pond:completed.length >= 10 };
 }
+
+// Five completed deeds reveal the whole decorative meadow. More deeds can
+// still add personal plants without changing the background composition.
+export function gardenStage(count) {
+  return Math.min(5, Math.max(0, Math.floor(Number(count) || 0)));
+}

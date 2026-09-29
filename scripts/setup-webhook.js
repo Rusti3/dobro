@@ -10,6 +10,6 @@ try { await maxCall(token, "/subscriptions", { method: "DELETE", query: { url } 
 }
 const result = await maxCall(token, "/subscriptions", {
   method: "POST",
-  payload: { url, update_types: ["message_created", "bot_started"], secret },
+  payload: { url, update_types: ["message_created", "message_callback", "bot_started", "bot_stopped"], secret },
 });
-console.log(JSON.stringify({ ok: true, url, update_types: result.update_types || ["message_created", "bot_started"] }, null, 2));
+console.log(JSON.stringify({ ok: true, url, update_types: result.update_types || ["message_created", "message_callback", "bot_started", "bot_stopped"] }, null, 2));

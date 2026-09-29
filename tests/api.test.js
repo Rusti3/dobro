@@ -1,35 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import {createStore} from '../server/store.js';
-test('Two-user invitation, ownership, persistence, revocation and deletion',async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'first-step-'));const port=33000+Math.floor(Math.random()*2000);const db=path.join(dir,'test.sqlite');
- let child;const start=()=>{child=spawn(process.execPath,['server/index.js'],{cwd:path.resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),HOST:'127.0.0.1',DB_PATH:db,DEMO_MODE:'true',MAX_BOT_TOKEN:''},stdio:'pipe'});};start();
- t.after(()=>{child?.kill();});
- const base=`http://127.0.0.1:${port}`;const wait=async()=>{for(let n=0;n<80;n++){try{if((await fetch(base+'/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Server did not start');};await wait();
- const client=()=>{let cookie='';return async(url,method='GET',body)=>{const r=await fetch(base+'/api'+url,{method,headers:{'Content-Type':'application/json',Cookie:cookie},...(body?{body:JSON.stringify(body)}:{})});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];return {status:r.status,data:await r.json()};};};
- const a=client(),b=client(),outsider=client();const initial=await a('/bootstrap');await b('/bootstrap');await outsider('/bootstrap');assert.ok(initial.data.catalog.length>=50);
- const created=await a('/plans','POST',{eventId:'11597695'});assert.equal(created.status,201);const id=created.data.id;assert.equal((await a('/plans','POST',{eventId:'11597695'})).data.id,id);
- assert.equal((await outsider(`/plans/${id}`,'PATCH',{meeting:'hack'})).status,404);
- assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm'})).status,400);
- const {data:{code}}=await a(`/plans/${id}/invite`,'POST',{});const publicView=await b('/invites/'+code);assert.equal(publicView.status,200);assert.equal(publicView.data.meeting,undefined);
- assert.equal((await b('/invites/'+code,'POST',{})).status,200);await b('/invites/'+code,'POST',{});assert.equal((await a('/bootstrap')).data.plans[0].members.length,1);
- assert.equal((await b(`/plans/${id}`,'PATCH',{meeting:'hack'})).status,403);
- assert.equal((await a(`/plans/${id}`,'PATCH',{meeting:'Встречаемся у входа',checks:['contact','contact','unknown']})).data.checks.length,1);
- assert.equal((await b('/bootstrap')).data.plans[0].meeting,'Встречаемся у входа');
- child.kill();await new Promise(r=>child.once('exit',r));start();await wait();assert.equal((await a('/bootstrap')).data.plans[0].meeting,'Встречаемся у входа');
- await a(`/plans/${id}/invite`,'DELETE',{});assert.equal((await outsider('/invites/'+code)).status,410);
- await b('/me','DELETE',{});assert.equal((await a('/bootstrap')).data.plans[0].members.length,0);
- // Advance a fixture into the past to exercise completion without bypassing the public API.
- const fixture=createStore(db);const p=fixture.plan(id);p.when=new Date(Date.now()-60000).toISOString();p.confirmed=true;p.status='ready';fixture.savePlan(p);fixture.db.close();
- assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm',hours:25})).status,400);
- const finished=await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm',hours:2.5});
- assert.equal(finished.data.status,'done');assert.equal(finished.data.hours,2.5);
- child.kill();await new Promise(r=>child.once('exit',r));start();await wait();
- assert.equal((await a('/bootstrap')).data.plans[0].hours,2.5);
- assert.equal((await a(`/plans/${id}`,'PATCH',{status:'done',reflection:'warm'})).status,400);
- await a('/me','DELETE',{});assert.equal((await a('/bootstrap')).data.plans.length,0);
+import { checkDemoApi } from './helpers/demo-api.mjs';
+
+const database=process.env.TEST_DATABASE_URL;
+if(database && !new URL(database).pathname.includes('test')) throw new Error('TEST_DATABASE_URL must point to an isolated test database');
+test('PostgreSQL API: complete demo journey, ownership, idempotency, intro and restart',{skip:!database},async t=>{
+  const port=33000+Math.floor(Math.random()*2000),base=`http://127.0.0.1:${port}`;
+  let child,output='';
+  async function start() {
+    child=spawn(process.execPath,['server/index.js'],{cwd:path.resolve(import.meta.dirname,'..'),
+      env:{...process.env,PORT:String(port),HOST:'127.0.0.1',DATABASE_URL:database,DB_SCHEMA:'app',
+        DEMO_MODE:'true',DEMO_DATA:'true',MAX_BOT_TOKEN:'',MAX_WEBHOOK_URL:'',PRIVATE_DATA_ENCRYPTION_KEY_FILE:'',PRIVATE_DATA_ENCRYPTION_KEY:'',CATALOG_ANNOTATED_ONLY:'false'},stdio:'pipe'});
+    child.stdout.on('data',data=>{output+=data;});child.stderr.on('data',data=>{output+=data;});
+    for(let n=0;n<150;n++) { try { if((await fetch(base+'/api/health')).ok)return; }catch{}
+      if(child.exitCode!==null) throw new Error(output.slice(-1800));
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    throw Error('Server did not start');
+  }
+  async function stop() {
+    if(!child || child.exitCode!==null)return;
+    const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;
+  }
+  t.after(stop);
+  await start();
+  const result=await checkDemoApi(base,{restart:async()=>{await stop();await start();}});
+  assert.equal(result.completed,1);assert.equal(result.calibration,6);
 });

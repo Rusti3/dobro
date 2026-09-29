@@ -1,6 +1,17 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
+*.tar
+*.tar.gz
+*.zip
+*.log
+*.dump
+*.sql.gz
 var/
+secrets/
 test-results/
 .vercel/
+public/maplibre/
+nature-preview.jpg

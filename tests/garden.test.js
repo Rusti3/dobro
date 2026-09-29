@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {gardenFor, speciesFor} from '../src/garden-model.js';
+import {gardenFor, gardenStage, speciesFor} from '../src/garden-model.js';
 import {validateHours} from '../server/garden.js';
 
 const visit = {id:'p1',owner:'a',eventId:'e1',status:'done',confirmed:true,when:'2026-09-18T09:00:00Z',completedAt:'2026-09-18T12:00:00Z',hours:2,event:{category:'animals'}};
@@ -20,6 +20,11 @@ test('Rewards unlock without daily streak requirements',()=>{
   const plans=Array.from({length:10},(_,i)=>({...visit,id:String(i),when:`2026-${String(i+1).padStart(2,'0')}-01`}));
   const g=gardenFor(plans,'a');assert.ok(g.rare&&g.bench&&g.pond);assert.equal(g.level,4);
   assert.equal(speciesFor({id:'11521651',category:'people'}),'elderly');
+});
+test('Garden grows from an empty meadow to a full scene after five deeds',()=>{
+  assert.deepEqual([0,1,2,3,4,5,6,10].map(gardenStage),[0,1,2,3,4,5,5,5]);
+  assert.equal(gardenStage(-2),0);
+  assert.equal(gardenStage(undefined),0);
 });
 test('Hours are bounded and do not accept coerced or non-finite input',()=>{
   for(const x of [-1,25,Infinity,NaN,'2',{},0.1,null]) assert.throws(()=>validateHours(x));

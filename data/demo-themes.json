@@ -1,0 +1,16 @@
+[
+  {"id":"animals","title":"Помочь в приюте","task":"animal_care","cause":"animal_welfare","beneficiary":"animals"},
+  {"id":"ecology","title":"Убрать берег реки","task":"cleaning_improvement","cause":"environment","beneficiary":"community"},
+  {"id":"elderly","title":"Провести встречу с пожилыми","task":"companionship","cause":"social_support","beneficiary":"elderly"},
+  {"id":"children","title":"Помочь на детском занятии","task":"education_support","cause":"education","beneficiary":"children"},
+  {"id":"city","title":"Помочь соседям на празднике","task":"event_guest_support","cause":"community_development","beneficiary":"community"},
+  {"id":"creativity","title":"Подготовить творческую мастерскую","task":"creative_work","cause":"culture","beneficiary":"community"},
+  {"id":"activity","title":"Помочь на благотворительном забеге","task":"event_guest_support","cause":"sports","beneficiary":"community"},
+  {"id":"education","title":"Подготовить учебные материалы","task":"education_support","cause":"education","beneficiary":"children"},
+  {"id":"events","title":"Встретить гостей фестиваля","task":"event_guest_support","cause":"culture","beneficiary":"community"},
+  {"id":"online_help","title":"Проверить текст для фонда","task":"content_creation","cause":"social_support","beneficiary":"community","online":true},
+  {"id":"donation","title":"Помочь на дне донора","task":"event_guest_support","cause":"health","beneficiary":"community","minimumAge":18},
+  {"id":"recycling","title":"Отсортировать вторсырьё","task":"sorting_packing","cause":"environment","beneficiary":"community"},
+  {"id":"nature","title":"Подготовить клумбу в парке","task":"cleaning_improvement","cause":"environment","beneficiary":"community"},
+  {"id":"charity","title":"Собрать посылки для фонда","task":"sorting_packing","cause":"social_support","beneficiary":"community"}
+]

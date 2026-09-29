@@ -1,0 +1,15 @@
+{
+  "eventTitle":"Тестовая сортировка помощи",
+  "sourceFacts":{"officialCategoryTitles":["Социальная поддержка"],"format":"on_site","structuredTasks":["Сортировка вещей"],"structuredRequirements":[],"organizerConditions":["Инструктаж"]},
+  "semantic":{
+    "schemaVersion":"semantic-1.1.0",
+    "quality":{"status":"suitable","taskClarity":"clear","reasons":["clear_task"],"explanation":"Тестовая задача описана."},
+    "supplementalClassification":{"supplementalCauseAreas":[],"beneficiaryGroups":["local_community"],"additionalVolunteerTasks":["sorting_packing"]},
+    "participation":{"modes":["small_group"],"commitment":"one_off","scheduleSpecificity":"by_agreement"},
+    "inferredRequirements":{"ownResources":[],"additionalPrerequisites":[],"unknownConditions":[]},
+    "complexity":{"physicalLoad":"light","emotionalLoad":"low","skillRequirement":"briefing","socialLoad":"moderate","responsibility":"supervised_simple","entryBarrier":"registration","timeCommitment":"up_to_2h","overall":21,"explanation":"Простая тестовая задача."},
+    "firstTimeFit":{"verdict":"suitable","score":80,"positives":["clear_duties","briefing_provided"],"concerns":[],"explanation":"Есть тестовый инструктаж."},
+    "feedSignals":{"friendsAllowed":"unknown","remoteTask":"no","calmTask":"no","firstTimeCandidate":"yes"},
+    "evidence":[],"confidence":1,"shortExplanation":"Синтетическая разметка для интеграционных тестов."
+  }
+}

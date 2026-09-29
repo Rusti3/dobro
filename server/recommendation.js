@@ -1,3 +1,4 @@
+import { eventFeatures, exclusiveSections, recommendationViewV2 } from './recommendation-v2.js';
 export const themeIds = [
   "animals", "ecology", "elderly", "children", "city", "creativity", "activity",
   "education", "events", "online_help", "donation", "recycling", "nature", "charity",
@@ -18,7 +19,22 @@ export function eventVector(event) {
   for (const theme of event.themes || [event.theme || event.category]) {
     if (themeIds.includes(theme)) vector[`theme_${theme}`] = theme === event.theme ? 1 : 0.65;
   }
-  const traits = event.traits || {};
+  const annotation = event.annotation;
+  const traits = {
+    ...(event.traits || {}),
+    ...(annotation ? {
+      format: annotation.format === "online" ? "online" : "offline",
+      social: annotation.feedSignals?.friendsAllowed === "yes"
+        ? "group"
+        : annotation.participation?.modes?.includes("solo") ? "solo" : event.traits?.social,
+      activity: ["moderate", "heavy"].includes(annotation.complexity?.physicalLoad)
+        ? "physical" : event.traits?.activity,
+      duration: annotation.facts?.exactDurationMinutes !== null && annotation.facts?.exactDurationMinutes <= 120
+        ? "short"
+        : annotation.complexity?.timeCommitment === "regular" ? "long" : event.traits?.duration,
+      weekend: annotation.filterTags?.includes("weekend"),
+    } : {}),
+  };
   if (traits.format) vector[`format_${traits.format}`] = 1;
   if (traits.social) vector[`social_${traits.social}`] = 1;
   if (traits.activity) vector[`activity_${traits.activity}`] = 1;
@@ -57,9 +73,19 @@ export function affinity(vector, event) {
 }
 
 const live = (event, now = Date.now()) => Date.parse(event.endsAt) > now;
+const recommendable = (event) => !["hidden", "human_review"].includes(event.annotation?.quality?.status);
+const editorialScore = (event) => {
+  const annotation = event.annotation;
+  if (!annotation) return 0;
+  const firstTime = (annotation.firstTime?.score ?? 50) / 100;
+  const complexity = annotation.complexity?.overall;
+  const quality = annotation.quality?.status === "suitable" ? 0.07 : 0.015;
+  const ease = complexity === null || complexity === undefined ? 0 : complexity <= 39 ? 0.05 : complexity >= 60 ? -0.05 : 0;
+  return quality + firstTime * 0.12 + ease;
+};
 const ranked = (catalog, vector, seed, excluded = new Set()) => catalog
-  .filter((event) => live(event) && !excluded.has(event.id))
-  .map((event) => ({ event, score: affinity(vector, event) + (stableNumber(`${seed}:${event.id}`) % 1000) / 100000 }))
+  .filter((event) => live(event) && recommendable(event) && !excluded.has(event.id))
+  .map((event) => ({ event, score: affinity(vector, event) + editorialScore(event) + (stableNumber(`${seed}:${event.id}`) % 1000) / 100000 }))
   .sort((a, b) => b.score - a.score);
 
 function takeDiverse(pool, count, used, output, reason) {
@@ -73,15 +99,17 @@ function takeDiverse(pool, count, used, output, reason) {
   }
 }
 
-export function calibrationBatch(catalog, vector, interests, userId, target = 12) {
+const CALIBRATION_TARGET = 6;
+
+export function calibrationBatch(catalog, vector, interests, userId, target = CALIBRATION_TARGET) {
   const selected = new Set(interests);
   const seed = `calibration:${userId}:${interests.join(",")}`;
   const pool = ranked(catalog, vector, seed);
   const used = new Set(), output = [];
-  takeDiverse(pool.filter(({ event }) => selected.has(event.theme)), Math.min(5, target), used, output, "По твоим интересам");
-  takeDiverse(pool.filter(({ event }) => !selected.has(event.theme) && event.themes?.some((theme) => selected.has(theme))), Math.min(8, target), used, output, "Соседняя тема");
-  takeDiverse(pool.filter(({ event }) => event.traits?.format === "online" || event.traits?.duration === "short"), Math.min(10, target), used, output, "Другой формат");
-  takeDiverse([...pool].reverse(), Math.min(11, target), used, output, "Неожиданный вариант");
+  takeDiverse(pool.filter(({ event }) => selected.has(event.theme)), Math.min(3, target), used, output, "По твоим интересам");
+  takeDiverse(pool.filter(({ event }) => !selected.has(event.theme) && event.themes?.some((theme) => selected.has(theme))), Math.min(4, target), used, output, "Соседняя тема");
+  takeDiverse(pool.filter(({ event }) => event.traits?.format === "online" || event.traits?.duration === "short"), Math.min(5, target), used, output, "Другой формат");
+  takeDiverse([...pool].reverse(), Math.min(6, target), used, output, "Неожиданный вариант");
   takeDiverse(pool, target, used, output, "Для точности");
   return output.slice(0, target);
 }
@@ -95,7 +123,7 @@ export function resetRecommendation(user, catalog, interests) {
     version: 1,
     vector,
     interactions: [],
-    calibration: calibrationBatch(catalog, vector, interests, user.id, 12),
+    calibration: calibrationBatch(catalog, vector, interests, user.id),
     days: {},
   };
   return user;
@@ -105,9 +133,13 @@ function ensureModel(user, catalog) {
   const interests = (user.profile?.interests || []).filter((id) => themeIds.includes(id));
   if (!user.recommendation) {
     const vector = initialVector(interests);
-    user.recommendation = { version: 1, vector, interactions: [], calibration: calibrationBatch(catalog, vector, interests, user.id, 12), days: {} };
+    user.recommendation = { version: 1, vector, interactions: [], calibration: calibrationBatch(catalog, vector, interests, user.id), days: {} };
   }
   user.recommendation.interactions ||= [];
+  user.recommendation.calibration ||= calibrationBatch(catalog, user.recommendation.vector || initialVector(interests), interests, user.id);
+  // Existing twelve-card journeys keep their first reactions and finish after card six.
+  if (user.recommendation.calibration.length > CALIBRATION_TARGET)
+    user.recommendation.calibration = user.recommendation.calibration.slice(0, CALIBRATION_TARGET);
   user.recommendation.days ||= {};
   return user.recommendation;
 }
@@ -135,47 +167,74 @@ function topEvents(catalog, vector, predicate, seed, limit = 6) {
   return ranked(catalog.filter(predicate), vector, seed).slice(0, limit).map(({ event }) => event.id);
 }
 
-export function recommendationView(user, catalog, day = moscowDay()) {
+export function recommendationViewLegacy(user, catalog, day = moscowDay()) {
   const interests = (user.profile?.interests || []).filter((id) => themeIds.includes(id));
-  if (!user.interestOnboarded || interests.length < 5) return { stage: "interests", minimumInterests: 5 };
+  if (!user.interestOnboarded) return { stage: "interests", minimumInterests: 0 };
   const model = ensureModel(user, catalog);
   const calibrationFeedback = model.interactions.filter((item) => item.context === "calibration");
+  const reacted = new Set(calibrationFeedback.map(item=>item.eventId));
+  // Removed or newly age-restricted cards must not strand an existing calibration.
+  model.calibration = model.calibration.filter(item=>reacted.has(item.id) || catalog.some(event=>event.id===item.id));
+  if(model.calibration.every(item=>reacted.has(item.id))) user.onboarded=true;
   if (!user.onboarded || calibrationFeedback.length < model.calibration.length) {
     return { stage: "calibration", target: model.calibration.length, completed: calibrationFeedback.length, items: model.calibration };
   }
   const daily = dailyBatch(user, catalog, day);
   const responded = new Set(daily.feedback.map((item) => item.eventId));
   const allSeen = new Set(model.interactions.map((item) => item.eventId));
-  const sections = [
-    { id: "nearby", title: "Рядом с тобой", subtitle: "Москва и понятный первый шаг", eventIds: topEvents(catalog, model.vector, (event) => event.traits?.distance === "nearby", `${user.id}:${day}:nearby`) },
-    { id: "weekend", title: "На выходные", subtitle: "Когда появляется немного свободного времени", eventIds: topEvents(catalog, model.vector, (event) => event.traits?.weekend, `${user.id}:${day}:weekend`) },
-    { id: "friends", title: "Можно пойти с друзьями", subtitle: "Дела, где компания будет кстати", eventIds: topEvents(catalog, model.vector, (event) => event.traits?.social === "group", `${user.id}:${day}:friends`) },
-    { id: "short", title: "Всего на час", subtitle: "Небольшие форматы для первого шага", eventIds: topEvents(catalog, model.vector, (event) => event.traits?.duration === "short", `${user.id}:${day}:short`) },
+  const sections = exclusiveSections([
+    { id: "daily", title: "Для тебя", subtitle: "Подобрали для тебя на сегодня", eventIds: daily.ids },
+    { id: "first_time", title: "Хорошо для первого раза", subtitle: "Понятные задачи и мягкий вход", eventIds: topEvents(catalog, model.vector, (event) => event.annotation?.filterTags?.includes("first_time"), `${user.id}:${day}:first-time`) },
+    { id: "nearby", title: "Рядом с тобой", subtitle: "В пределах 10 км по прямой", eventIds: topEvents(catalog, model.vector, (event) => Number.isFinite(event.distanceKm) && event.distanceKm <= 10, `${user.id}:${day}:nearby`) },
+    { id: "weekend", title: "На выходные", subtitle: "Дата действительно выпадает на выходной", eventIds: topEvents(catalog, model.vector, (event) => event.annotation?.filterTags?.includes("weekend"), `${user.id}:${day}:weekend`) },
+    { id: "friends", title: "Можно пойти с друзьями", subtitle: "Совместное участие подтверждено", eventIds: topEvents(catalog, model.vector, (event) => event.annotation?.filterTags?.includes("friends"), `${user.id}:${day}:friends`) },
+    { id: "short", title: "На час-два", subtitle: "Короткая длительность указана в источнике", eventIds: topEvents(catalog, model.vector, (event) => event.annotation?.filterTags?.includes("short"), `${user.id}:${day}:short`) },
+    { id: "remote", title: "Помочь из дома", subtitle: "Есть конкретная удалённая задача", eventIds: topEvents(catalog, model.vector, (event) => event.annotation?.filterTags?.includes("remote") || (!event.annotation && event.traits?.format === "online"), `${user.id}:${day}:remote`) },
     { id: "taste", title: "Похоже, тебе понравится", subtitle: "Собрали по твоим выборам", eventIds: ranked(catalog, model.vector, `${user.id}:${day}:taste`).slice(0, 6).map(({ event }) => event.id) },
     { id: "new", title: "Попробовать что-то новое", subtitle: "Чуть дальше привычных тем", eventIds: ranked(catalog, model.vector, `${user.id}:${day}:new`, allSeen).slice(-6).reverse().map(({ event }) => event.id) },
-  ].filter((section) => section.eventIds.length);
+  ].filter((section) => section.id==='nearby' || section.eventIds.length),catalog);
   const topTaste = Object.entries(model.vector).filter(([key]) => key.startsWith("theme_")).sort((a, b) => b[1] - a[1]).slice(0, 4);
   return {
-    stage: responded.size >= daily.ids.length ? "feed" : "daily",
+    stage: "feed",
     daily: { date: day, ids: daily.ids, completed: responded.size, target: daily.ids.length, feedback: daily.feedback },
     sections,
     taste: topTaste.map(([dimension, weight]) => ({ id: dimension.slice(6), weight })),
   };
 }
 
-export function recordFeedback(user, catalog, { eventId, action, context }, day = moscowDay()) {
-  if (!["like", "skip"].includes(action) || !["calibration", "daily", "plan", "visit"].includes(context)) throw new Error("Некорректная реакция.");
+export function recommendationView(user,catalog,day=moscowDay(),options={}) {
+  if (!user.interestOnboarded) return {stage:'interests',minimumInterests:0};
+  const model=ensureModel(user,catalog);
+  const age=Number(user.profile?.age);
+  const ageKnown=Number.isInteger(age)&&age>=7&&age<=100;
+  if(!ageKnown && model.calibration.length<CALIBRATION_TARGET && catalog.length>=CALIBRATION_TARGET) {
+    const reacted=new Set(model.interactions.filter(item=>item.context==='calibration').map(item=>item.eventId));
+    const available=new Set(catalog.map(item=>item.id));
+    const prior=model.calibration.filter(item=>reacted.has(item.id)||available.has(item.id));
+    const included=new Set(prior.map(item=>item.id));
+    const additional=calibrationBatch(catalog,model.vector,user.profile?.interests||[],user.id)
+      .filter(item=>!included.has(item.id));
+    model.calibration=[...prior,...additional].slice(0,CALIBRATION_TARGET);
+    user.onboarded=false;
+  }
+  if (!user.onboarded || process.env.RECOMMENDATION_V2_ENABLED === 'false') return recommendationViewLegacy(user,catalog,day);
+  return recommendationViewV2(user,catalog,day,options);
+}
+
+export function recordFeedback(user, catalog, { eventId, action, context, planId }, day = moscowDay()) {
+  if (!["like", "skip", "open_detail", "cancel_plan"].includes(action) || !["calibration", "daily", "plan", "visit", "detail"].includes(context)) throw new Error("Некорректная реакция.");
   const event = catalog.find((item) => item.id === String(eventId));
-  if (!event || !live(event)) throw new Error("Это дело больше недоступно.");
+  if (!event || (!live(event) && !['visit','plan'].includes(context))) throw new Error("Это дело больше недоступно.");
   const model = ensureModel(user, catalog);
-  const key = context === "daily" || context === "visit" ? day : context;
-  if (model.interactions.some((item) => item.eventId === event.id && item.key === key)) return user;
-  const interaction = { eventId: event.id, action, context, key, at: new Date().toISOString() };
+  const signalAction = action === 'like' && context === 'visit' ? 'completed' : action === 'like' && context === 'plan' ? 'plan' : action;
+  const key = `${context}:${planId || day}:${event.id}:${signalAction}`;
+  if(context==='calibration' && model.interactions.some(item=>item.eventId===event.id && item.context==='calibration')) return user;
+  if (model.interactions.some((item) => item.key === key)) return user;
+  const interaction = { eventId: event.id, action:signalAction, context, key, featureVersion:2, features:eventFeatures(event), at: new Date().toISOString() };
   const strength = context === "plan" ? 0.35 : context === "visit" ? 0.45 : undefined;
-  model.vector = applyFeedback(model.vector, event, action, strength);
+  if (['like','skip'].includes(action)) model.vector = applyFeedback(model.vector, event, action, strength);
   model.interactions.push(interaction);
-  model.interactions = model.interactions.slice(-300);
   if (context === "daily") dailyBatch(user, catalog, day).feedback.push({ eventId: event.id, action });
-  if (context === "calibration" && model.interactions.filter((item) => item.context === "calibration").length >= model.calibration.length) user.onboarded = true;
+  if (context === "calibration" && new Set(model.interactions.filter((item) => item.context === "calibration").map(item=>item.eventId)).size >= model.calibration.length) user.onboarded = true;
   return user;
 }
