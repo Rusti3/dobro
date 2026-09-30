@@ -56,11 +56,72 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      app-test:
+        condition: service_healthy
     restart: unless-stopped
+    networks: [default, demo-edge]
+
+  demo-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DEMO_POSTGRES_ADMIN_PASSWORD:?Set DEMO_POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: helpi_demo
+      DEMO_POSTGRES_PASSWORD: ${DEMO_POSTGRES_PASSWORD:?Set DEMO_POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --data-checksums --auth-host=scram-sha-256
+    volumes:
+      - demo-postgres-data:/var/lib/postgresql/data
+      - ./docker/demo-postgres-init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d helpi_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [demo-db]
+
+  app-test:
+    image: ${APP_IMAGE:-helpi:v2026.09.30}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3210
+      DATABASE_URL: postgresql://helpi_demo_app:${DEMO_POSTGRES_PASSWORD:?Set DEMO_POSTGRES_PASSWORD}@demo-postgres:5432/helpi_demo
+      DB_SCHEMA: app
+      DEMO_MODE: "true"
+      DEMO_DATA: "true"
+      DEMO_COOKIE_PATH: /api-test
+      DEMO_PROFILE_TTL_DAYS: "2"
+      RECSYS_URL: http://recsys:3211
+      MAX_BOT_TOKEN: ""
+      MAX_POLLING: "false"
+      CATALOG_SYNC_ENABLED: "false"
+      ANNOTATION_ENABLED: "false"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+    depends_on:
+      demo-postgres:
+        condition: service_healthy
+      recsys:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [demo-db, recsys, demo-edge]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   caddy-data:
   caddy-config:
+  demo-postgres-data:
+
+networks:
+  demo-db:
+    internal: true
+  demo-edge:
+    internal: true
 
 secrets:
   private_data_key:

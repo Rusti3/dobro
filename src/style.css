@@ -302,6 +302,11 @@ html[data-theme="dark"] .interest-close{background:var(--line);color:var(--ink)}
 .age-prompt .primary{min-height:52px;font-size:1.15rem}
 .age-prompt .text-button{justify-content:center;min-height:44px;font-size:1rem}
 .age-prompt .age-prompt-error{background:#b4232d;color:#fff;padding:12px;border-radius:8px}
+.location-prompt-content{display:flex;flex-direction:column;gap:16px}
+.location-prompt .text-button{align-self:center}
+.experience-panel{display:flex;flex-direction:column;justify-content:center;gap:24px;min-height:100dvh}
+.experience-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.experience-actions button{min-height:54px}
 @media(max-width:600px){.profile-plans{padding:0 14px}.profile-plan-card{padding:16px}.profile-plan-card .button-row{display:grid;grid-template-columns:1fr}.profile-plan-card .secondary{width:100%}}
 .garden-intro{width:min(410px,calc(100% - 32px));padding:28px;border:1px solid var(--line);border-radius:20px;background:var(--paper);color:inherit;box-shadow:0 16px 64px #0005}
 .garden-intro::backdrop{background:#10151288}

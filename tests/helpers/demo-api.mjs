@@ -20,17 +20,19 @@ export async function checkDemoApi(base, {restart} = {}) {
   try {
     const initial=(await a('/bootstrap')).data;
     assert.equal(initial.user.gardenIntroSeen,false);
+    assert.equal(initial.user.locationPromptSeen,false);
     assert.equal(initial.recommendations.stage,'interests');
     assert.equal(initial.plans.length,1);
     const training=initial.plans[0];
     assert.equal(training.demo,true); assert.equal(training.status,'ready');
     assert.ok(Date.parse(training.when)<Date.now());
     assert.equal(gardenFor(initial.plans,initial.user.id).completed.length,0);
-    assert.ok(initial.catalog.length>100);
-    assert.ok(initial.catalog.every(e=>e.demo && e.image.startsWith('/theme-images/')));
     await b('/bootstrap'); await b('/profile','PATCH',{age:23});
     assert.equal((await b(`/plans/${training.id}`,'PATCH',{status:'done',reflection:'warm'})).status,404);
-    assert.equal((await a('/profile','PATCH',{interests:['animals','ecology']})).status,200);
+    assert.equal((await a('/profile','PATCH',{interests:['animals','ecology'],volunteerExperience:'first_time'})).status,200);
+    const selected=(await a('/bootstrap')).data;
+    assert.ok(selected.catalog.length>100);
+    assert.ok(selected.catalog.every(e=>e.demo && e.image.startsWith('/theme-images/')));
     for(let i=0;i<6;i++) {
       const boot=(await a('/bootstrap')).data;
       assert.equal(boot.recommendations.stage,'calibration'); assert.equal(boot.recommendations.target,6);
@@ -42,6 +44,8 @@ export async function checkDemoApi(base, {restart} = {}) {
     assert.equal(calibrated.recommendations.stage,'feed'); assert.equal(calibrated.user.profile.age,null);
     assert.equal((await a('/profile','PATCH',{age:6})).status,400);
     await a('/profile','PATCH',{age:23});
+    assert.equal((await a('/onboarding/location-intro-seen','POST',{})).status,200);
+    assert.equal((await a('/onboarding/location-intro-seen','POST',{})).status,200);
     const feed=(await a('/bootstrap')).data;
     assert.deepEqual(feed.user.recommendation.calibration,calibrated.user.recommendation.calibration);
     assert.equal(new Set(feed.catalog.flatMap(e=>e.themes)).size,14);
@@ -82,6 +86,7 @@ export async function checkDemoApi(base, {restart} = {}) {
     if (restart) await restart();
     const persisted=(await a('/bootstrap')).data;
     assert.equal(persisted.user.gardenIntroSeen,true);
+    assert.equal(persisted.user.locationPromptSeen,true);
     assert.equal(gardenFor(persisted.plans,persisted.user.id).completed.length,1);
     assert.equal((await a(`/plans/${training.id}`,'PATCH',{status:'done',reflection:'warm'})).status,400);
     assert.equal((await a('/bootstrap')).data.plans.filter(p=>p.demo).length,1);

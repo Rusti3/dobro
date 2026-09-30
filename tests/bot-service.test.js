@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import catalog from "../data/catalog.json" with { type: "json" };
 import { botMessageBody, botRecommendations, dailyDigestPanel } from "../server/bot-service.js";
 import { processUpdate } from "../server/max.js";
+import http from 'node:http';
+import { handleRecSys } from '../server/recsys-service.js';
 
 function fixture() {
   const user = { id: "max:12345", name: "Анна", registered: true, interestOnboarded: true, onboarded: true,
@@ -71,7 +73,12 @@ test("mini-app geolocation bridge still persists the point and returns to the ma
   assert.equal(calls[0][2].payload.attachments[0].payload.buttons[0][0].payload, "tab_map");
 });
 
-test("daily digest uses shared recommender and opens events in mini-app without chat callbacks", async () => {
+test("daily digest uses shared recommender and opens events in mini-app without chat callbacks", async t => {
+  const service = http.createServer(handleRecSys);
+  await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
+  const previous = process.env.RECSYS_URL;
+  process.env.RECSYS_URL = `http://127.0.0.1:${service.address().port}`;
+  t.after(async () => { process.env.RECSYS_URL = previous; await new Promise(resolve => service.close(resolve)); });
   const { user, options } = fixture();
   const result = await botRecommendations({ ...options, user });
   assert.equal(result.recommendations.stage, "feed");

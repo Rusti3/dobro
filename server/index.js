@@ -10,10 +10,11 @@ import { createCatalogRepository } from "./catalog-repository.js";
 import { eligibleEvents, eventAllowedForUser, maxProfile, maxUser, validatePlan, validateRegistration, validateAge } from "./domain.js";
 import { startPolling, startDailyDigestLoop, processUpdate, requestUserLocation, sendInviteMessage } from "./max.js";
 import { validateHours } from './garden.js';
-import { recommendationView, recordFeedback, resetRecommendation, themeIds } from './recommendation.js';
-import { projectCandidates, publicEvent, eventFeatures } from './recommendation-v2.js';
+import { themeIds } from '../shared/theme-ids.js';
+import { publicEvent } from './public-event.js';
 import { activeLocation, validPoint } from './location.js';
 import { loadRecommendationContext } from './recommendation-context.js';
+import { recsys, recsysHealth } from './recsys-client.js';
 import { migratePrivateData, requirePrivateDataKey } from './private-data.js';
 import { demoDataEnabled, seedDemoCatalog, seedDemoPlan } from './demo-data.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,6 +35,15 @@ const botUsername = process.env.MAX_BOT_USERNAME || "";
 const webhookUrl = process.env.MAX_WEBHOOK_URL || "";
 const localAddresses = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 const localPreview = process.env.NODE_ENV !== "production";
+const demoCookiePath = /^\/[a-zA-Z0-9/_-]*$/.test(process.env.DEMO_COOKIE_PATH || '/') ? process.env.DEMO_COOKIE_PATH || '/' : '/';
+const apiPrefix = demoCookiePath === '/' ? '' : demoCookiePath;
+const demoProfileTtlDays = Number.parseInt(process.env.DEMO_PROFILE_TTL_DAYS || '0', 10);
+if (process.env.DEMO_PROFILE_TTL_DAYS && (!demo || !Number.isInteger(demoProfileTtlDays) || demoProfileTtlDays < 1 || demoProfileTtlDays > 30))
+  throw new Error('DEMO_PROFILE_TTL_DAYS requires demo mode and a value from 1 to 30.');
+if (demoProfileTtlDays) {
+  await store.expireDemoProfiles(demoProfileTtlDays);
+  setInterval(() => store.expireDemoProfiles(demoProfileTtlDays).catch(error => console.error('Demo profile cleanup:', error)), 6 * 3600_000).unref();
+}
 if (!demo && !token) throw new Error("MAX_BOT_TOKEN обязателен при DEMO_MODE=false.");
 if (token && !demo && (!appUrl.startsWith("https://") || !botUsername))
   throw new Error("MAX production requires HTTPS MAX_MINI_APP_URL and MAX_BOT_USERNAME.");
@@ -92,7 +102,7 @@ async function user(req, res) {
       session = randomBytes(24).toString("hex");
       res.setHeader(
         "Set-Cookie",
-        `first_session=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${
+        `first_session=${session}; HttpOnly; SameSite=Lax; Path=${demoCookiePath}; Max-Age=2592000${
           req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""
         }`,
       );
@@ -111,6 +121,7 @@ async function user(req, res) {
       onboarded: false,
       reminders: true,
       gardenIntroSeen: false,
+      locationPromptSeen: false,
       createdAt: new Date().toISOString(),
     };
     await store.saveUser(u);
@@ -141,8 +152,18 @@ async function mine(u, catalog) {
     .map((p) => viewPlan(p, u, catalog));
 }
 const rates = new Map();
+const demoRates = new Map();
 const server = http.createServer(async (req, res) => {
   try {
+    if (demoProfileTtlDays) {
+      const key = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      const now = Date.now();
+      const bucket = demoRates.get(key) || { start: now, count: 0 };
+      if (now - bucket.start > 60000) { bucket.start = now; bucket.count = 0; }
+      if (++bucket.count > 180) return json(res, 429, { error: 'Слишком много запросов. Попробуйте через минуту.' });
+      demoRates.set(key, bucket);
+      if (demoRates.size > 20000) for (const [address, value] of demoRates) if (now - value.start > 60000) demoRates.delete(address);
+    }
     const url = new URL(req.url, "http://localhost");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -184,16 +205,16 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api" || url.pathname === "/api/") {
       if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-      return res.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>хелпи API</title><link rel="stylesheet" href="/api/swagger-ui/swagger-ui.css"><style>body{margin:0;background:#fafafa;color:#17212b;font-family:system-ui,sans-serif}.api-note{padding:14px 24px;background:#e9f5ed;border-bottom:1px solid #b6d5bd}.api-note a{color:#146c38}.api-note p{margin:6px 0 0}</style></head><body><div class="api-note"><strong>хелпи API</strong> · <a href="/api/health">Проверить работу</a> · <a href="/api/openapi.yaml">OpenAPI YAML</a><p>Документация открыта вне MAX. Личные методы требуют подписанные данные запуска MAX; без них запросы вернут 401.</p></div><div id="swagger-ui"></div><script src="/api/swagger-ui/swagger-ui-bundle.js"></script><script src="/api/swagger-ui/init.js"></script></body></html>`);
+      return res.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>хелпи API</title><link rel="stylesheet" href="${apiPrefix}/api/swagger-ui/swagger-ui.css"><style>body{margin:0;background:#fafafa;color:#17212b;font-family:system-ui,sans-serif}.api-note{padding:14px 24px;background:#e9f5ed;border-bottom:1px solid #b6d5bd}.api-note a{color:#146c38}.api-note p{margin:6px 0 0}</style></head><body><div class="api-note"><strong>хелпи API</strong> · <a href="${apiPrefix}/api/health">Проверить работу</a> · <a href="${apiPrefix}/api/openapi.yaml">OpenAPI YAML</a><p>${apiPrefix ? 'Это изолированное демо: личные запросы работают через тестовую cookie без логина.' : 'Документация открыта вне MAX. Личные методы требуют подписанные данные запуска MAX; без них запросы вернут 401.'}</p></div><div id="swagger-ui"></div><script src="${apiPrefix}/api/swagger-ui/swagger-ui-bundle.js"></script><script src="${apiPrefix}/api/swagger-ui/init.js"></script></body></html>`);
     }
     if (url.pathname === "/api/index.json") {
       if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
       return json(res, 200, {
         name: "хелпи API",
         version: process.env.APP_COMMIT || "local",
-        openapi: "/api/openapi.yaml",
-        health: "/api/health",
-        authentication: "Личные методы требуют подписанные данные запуска MAX в заголовке X-Max-Init-Data. Локальное Docker-демо использует отдельную cookie-сессию.",
+        openapi: `${apiPrefix}/api/openapi.yaml`,
+        health: `${apiPrefix}/api/health`,
+        authentication: apiPrefix ? "Изолированное демо использует HttpOnly cookie без логина и MAX-токена." : "Личные методы требуют подписанные данные запуска MAX в заголовке X-Max-Init-Data.",
       });
     }
     if (url.pathname.startsWith("/api/swagger-ui/")) {
@@ -201,7 +222,7 @@ const server = http.createServer(async (req, res) => {
       const asset = url.pathname.slice("/api/swagger-ui/".length);
       if (asset === "init.js") {
         res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" });
-        return res.end("window.onload=function(){SwaggerUIBundle({url:'/api/openapi.yaml',dom_id:'#swagger-ui',deepLinking:true,validatorUrl:null,presets:[SwaggerUIBundle.presets.apis]});};");
+        return res.end(`window.onload=function(){SwaggerUIBundle({url:'${apiPrefix}/api/openapi.yaml',dom_id:'#swagger-ui',deepLinking:true,validatorUrl:null,presets:[SwaggerUIBundle.presets.apis]});};`);
       }
       if (!["swagger-ui-bundle.js", "swagger-ui.css"].includes(asset)) return json(res, 404, { error: "Не найдено." });
       res.writeHead(200, { "Content-Type": asset.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600" });
@@ -210,24 +231,27 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/openapi.yaml") {
       if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
       res.writeHead(200, { "Content-Type": "application/yaml; charset=utf-8", "Cache-Control": "public, max-age=3600" });
-      return fs.createReadStream(path.join(root, "docs", "openapi.yaml")).pipe(res);
+      const specification = fs.readFileSync(path.join(root, "docs", "openapi.yaml"), 'utf8');
+      return res.end(apiPrefix ? specification.replace('servers:\n  - url: /\n  - url: /api-test', 'servers:\n  - url: /api-test\n  - url: /') : specification);
     }
     if (url.pathname === "/api/health") {
-      const [database, catalog, workerHeartbeat, lastCatalogSync, lastAnnotationBatch] = await Promise.all([
+      const [database, catalog, workerHeartbeat, lastCatalogSync, lastAnnotationBatch, recommendationService] = await Promise.all([
         databaseHealth(pool),
         catalogRepository.counts(),
         store.meta("worker_heartbeat"),
         store.meta("last_catalog_sync"),
         store.meta("last_annotation_batch"),
+        recsysHealth(),
       ]);
-      return json(res, 200, {
-        ok: true,
+      return json(res, recommendationService.ok ? 200 : 503, {
+        ok: recommendationService.ok,
         version: process.env.APP_COMMIT || 'local',
         mode: demo || isLocalPreview(req) ? "demo" : "max",
         transport: webhookUrl ? "webhook" : "polling",
         database,
         catalog,
         worker: { heartbeat: workerHeartbeat, lastCatalogSync: lastCatalogSync ? JSON.parse(lastCatalogSync) : null, lastAnnotationBatch: lastAnnotationBatch ? JSON.parse(lastAnnotationBatch) : null },
+        recsys: recommendationService,
       });
     }
     if (url.pathname === "/api/max/webhook") {
@@ -270,29 +294,30 @@ const server = http.createServer(async (req, res) => {
     const requestedCity = url.searchParams.get('city') || data.city;
     const city = cityOptions.includes(requestedCity) ? requestedCity : u.profile?.city || 'Москва';
     const rawCatalog = await catalogRepository.listActive();
-    const { location, context, calibrationPreview, projected: catalog } = await loadRecommendationContext({ user: u, store, catalogRepository, rawCatalog, city });
+    const { location, context, calibrationPreview, projected: catalog, available: availableCatalog } = await loadRecommendationContext({ user: u, store, catalogRepository, rawCatalog, city });
     async function feedback(payload, events=catalog) {
-      recordFeedback(u,events,payload);
-      const latest=u.recommendation.interactions.at(-1);
-      if(latest) await store.saveInteraction(u.id,latest);
+      const result = await recsys('feedback', { user: u, catalog: events, feedback: payload });
+      if (!result.interaction) return;
+      const inserted = await store.saveInteraction(u.id, result.interaction);
+      if (inserted) Object.assign(u, result.user);
     }
-    function selectedEvent(eventId,vacancyId) {
+    async function selectedEvent(eventId,vacancyId) {
       if(!vacancyId) return catalog.find(event=>event.id===eventId);
       const source=rawCatalog.find(event=>event.id===eventId);
       const variant=source?.variants?.find(event=>event.selectedVacancyId===String(vacancyId));
-      return variant ? projectCandidates([variant],u,context)[0] : null;
+      return variant ? (await recsys('project', { user: u, catalog: [variant], context })).candidates[0] : null;
     }
     const eventRoute = url.pathname.match(/^\/api\/events\/([a-zA-Z0-9_-]+)$/);
     if (eventRoute && req.method === "GET") {
       const source = rawCatalog.find(event => event.id === eventRoute[1]);
-      const candidates = source ? projectCandidates([source], u, { ...context, city: source.city || city }) : [];
+      const candidates = source ? (await recsys('project', { user: u, catalog: [source], context: { ...context, city: source.city || city } })).candidates : [];
       const event = eligibleEvents(candidates, u)[0];
       if (!event) fail("Дело больше недоступно или не подходит по возрасту.", 404);
       return json(res, 200, publicEvent(event));
     }
     if (url.pathname === "/api/bootstrap" && req.method === "GET") {
-      const availableCatalog = calibrationPreview ? catalog : eligibleEvents(catalog, u);
-      const recommendations = recommendationView(u, availableCatalog, undefined, context);
+      const view = await recsys('view', { user: u, catalog: availableCatalog, context });
+      Object.assign(u, view.user);
       await store.saveUser(u);
       return json(res, 200, {
         user: { ...u, recommendation: u.recommendation ? { ...u.recommendation, interactions: [] } : undefined },
@@ -300,7 +325,7 @@ const server = http.createServer(async (req, res) => {
         plans: await mine(u, catalog),
         catalog: availableCatalog.map(publicEvent),
         location: activeLocation(location),
-        recommendations,
+        recommendations: view.recommendations,
          mode: demo || isLocalPreview(req) ? "demo" : "max",
          botUsername: botUsername || null,
       });
@@ -345,6 +370,10 @@ const server = http.createServer(async (req, res) => {
         u.registered = true;
       }
       if (Object.hasOwn(data, 'age')) u.profile = { ...u.profile, age: validateAge(data.age) };
+      if (Object.hasOwn(data, 'volunteerExperience')) {
+        if (!['first_time', 'experienced'].includes(data.volunteerExperience)) fail('Выбери ответ об опыте участия.');
+        u.profile = { ...u.profile, volunteerExperience: data.volunteerExperience };
+      }
       const interests = Array.isArray(data.interests)
         ? [...new Set(data.interests.filter((value) => themeIds.includes(value)))].slice(0, 14)
         : null;
@@ -359,13 +388,17 @@ const server = http.createServer(async (req, res) => {
           : u.profile.barrier,
         interests: interests || (u.profile.interests || []),
         age: u.profile.age ?? null,
+        volunteerExperience: u.profile.volunteerExperience ?? null,
       };
-      if (interests) {
+      const needsCalibrationRefresh = Object.hasOwn(data, 'volunteerExperience') && u.interestOnboarded
+        && !(u.recommendation?.interactions || []).some(item => item.context === 'calibration') && !u.onboarded;
+      if (interests || needsCalibrationRefresh) {
         if (!u.registered) fail("Сначала закончи регистрацию.", 403);
-      const age = Number(u.profile?.age);
-      const preview = !(Number.isInteger(age) && age >= 7 && age <= 100);
-        const candidates = projectCandidates(rawCatalog,u,{...context,city:u.profile.city,ignoreAge:preview});
-        resetRecommendation(u, preview ? candidates : eligibleEvents(candidates,u), interests);
+        const age = Number(u.profile?.age);
+        const preview = !(Number.isInteger(age) && age >= 7 && age <= 100);
+        const candidates = (await recsys('project', { user: u, catalog: rawCatalog, context: { ...context, city: u.profile.city, ignoreAge: preview } })).candidates;
+        const reset = await recsys('reset', { user: u, catalog: preview ? candidates : eligibleEvents(candidates,u), interests: interests || u.profile.interests || [] });
+        Object.assign(u, reset.user);
       }
       if (typeof data.reminders === "boolean") u.reminders = data.reminders;
       if (typeof data.dailyDigest === "boolean") u.dailyDigest = data.dailyDigest;
@@ -376,21 +409,25 @@ const server = http.createServer(async (req, res) => {
       await store.markGardenIntroSeen(u.id);
       return json(res, 200, { seen: true });
     }
+    if (url.pathname === "/api/onboarding/location-intro-seen" && req.method === "POST") {
+      await store.markLocationPromptSeen(u.id);
+      return json(res, 200, { seen: true });
+    }
     if (url.pathname === "/api/recommendations/feedback" && req.method === "POST") {
       if (!u.registered) fail("Сначала закончи регистрацию.", 403);
-      const availableCatalog = calibrationPreview ? catalog : eligibleEvents(catalog, u);
       if(!['calibration','daily'].includes(data.context) || !['like','skip'].includes(data.action)) fail('Некорректная реакция.');
       await feedback(data,availableCatalog);
       await store.saveUser(u);
-      const feedCatalog = u.onboarded ? eligibleEvents(projectCandidates(rawCatalog,u,context),u) : availableCatalog;
-      const recommendations=recommendationView(u,feedCatalog,undefined,context);
+      const feedCatalog = u.onboarded ? eligibleEvents((await recsys('project', { user: u, catalog: rawCatalog, context })).candidates,u) : availableCatalog;
+      const view = await recsys('view', { user: u, catalog: feedCatalog, context });
+      Object.assign(u, view.user);
       await store.saveUser(u);
-      return json(res, 200, { user: { ...u, recommendation:{...u.recommendation,interactions:[]} }, recommendations,
+      return json(res, 200, { user: { ...u, recommendation:{...u.recommendation,interactions:[]} }, recommendations: view.recommendations,
         ...(u.onboarded ? {catalog:feedCatalog.map(publicEvent)} : {}) });
     }
     if(url.pathname === '/api/recommendations/signals') {
       if(req.method!=='POST' || data.action!=='open_detail' || !u.registered) fail('Некорректный сигнал.');
-      const event=selectedEvent(data.eventId,data.selectedVacancyId);
+      const event=await selectedEvent(data.eventId,data.selectedVacancyId);
       if(!event) fail('Это дело больше недоступно.',404);
       await feedback({eventId:data.eventId,action:'open_detail',context:'detail'},[event]);
       return json(res,200,{ok:true});
@@ -399,13 +436,13 @@ const server = http.createServer(async (req, res) => {
       await store.deleteUser(u.id);
       res.setHeader(
         "Set-Cookie",
-        "first_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
+        `first_session=; HttpOnly; SameSite=Lax; Path=${demoCookiePath}; Max-Age=0`,
       );
       return json(res, 200, { ok: true });
     }
     if (url.pathname === "/api/plans" && req.method === "POST") {
       if (!u.registered) fail("Сначала закончи регистрацию.", 403);
-      const event = selectedEvent(data.eventId,data.selectedVacancyId);
+      const event = await selectedEvent(data.eventId,data.selectedVacancyId);
       if (!event && rawCatalog.some(e=>e.id===data.eventId)) fail('Это событие недоступно для твоего профиля или выбранного города.',403);
       if (event && !eventAllowedForUser(event, u))
         fail("Это событие не подходит по возрастному ограничению.", 403);

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "name": "хелпи — проверка изолированного API",
+  "base_url": "https://хелпи.рф/api-test",
+  "role": "demo_cookie_session",
+  "description": "Запросы выполняются только в отдельной тестовой БД. Логин, MAX-токен и ключи не требуются. Формат JSON является допустимым YAML 1.2.",
+  "parameters": {
+    "content_type": "application/json",
+    "cookie": "first_session из Set-Cookie первого /api/bootstrap; далее передаётся автоматически",
+    "volunteerExperience": ["first_time", "experienced"],
+    "age": 23,
+    "interests": ["animals", "ecology"]
+  },
+  "checks": [
+    {"id":"health", "method":"GET", "path":"/api/health", "role":"anonymous", "expect":{"status":200,"content_type":"application/json","required":["ok","mode","database.ok","recsys.ok"],"equals":{"ok":true,"mode":"demo","recsys.ok":true}}},
+    {"id":"bootstrap_new", "method":"GET", "path":"/api/bootstrap", "role":"demo_cookie_session", "expect":{"status":200,"content_type":"application/json","required":["user.id","user.profile","user.locationPromptSeen","catalog","recommendations.stage"],"equals":{"recommendations.stage":"interests","user.locationPromptSeen":false}}},
+    {"id":"save_topics_experience", "method":"PATCH", "path":"/api/profile", "role":"demo_cookie_session", "body":{"interests":["animals","ecology"],"volunteerExperience":"first_time"}, "expect":{"status":200,"content_type":"application/json","required":["profile.volunteerExperience"],"equals":{"profile.volunteerExperience":"first_time"}}},
+    {"id":"six_swipes", "repeat":6, "before":{"method":"GET","path":"/api/bootstrap","expect":{"status":200,"content_type":"application/json","required":["recommendations.items","recommendations.completed"],"equals":{"recommendations.stage":"calibration","recommendations.target":6}}}, "method":"POST", "path":"/api/recommendations/feedback", "role":"demo_cookie_session", "body":{"eventId":"$nextCalibrationEventId","action":"like","context":"calibration"}, "expect":{"status":200,"content_type":"application/json","required":["recommendations.stage","user.id"]}},
+    {"id":"feed_after_swipes", "method":"GET", "path":"/api/bootstrap", "role":"demo_cookie_session", "expect":{"status":200,"content_type":"application/json","required":["recommendations.sections","recommendations.daily.ids"],"equals":{"recommendations.stage":"feed"}}},
+    {"id":"save_age", "method":"PATCH", "path":"/api/profile", "role":"demo_cookie_session", "body":{"age":23}, "expect":{"status":200,"content_type":"application/json","required":["profile.age"],"equals":{"profile.age":23}}},
+    {"id":"close_location_prompt", "method":"POST", "path":"/api/onboarding/location-intro-seen", "role":"demo_cookie_session", "body":{}, "expect":{"status":200,"content_type":"application/json","required":["seen"],"equals":{"seen":true}}},
+    {"id":"close_location_prompt_again", "method":"POST", "path":"/api/onboarding/location-intro-seen", "role":"demo_cookie_session", "body":{}, "expect":{"status":200,"content_type":"application/json","required":["seen"],"equals":{"seen":true}}},
+    {"id":"persisted_prompt", "method":"GET", "path":"/api/bootstrap", "role":"demo_cookie_session", "expect":{"status":200,"content_type":"application/json","required":["user.locationPromptSeen"],"equals":{"user.locationPromptSeen":true}}},
+    {"id":"invalid_location", "method":"POST", "path":"/api/location", "role":"demo_cookie_session", "body":{"lat":0,"lng":0}, "expect":{"status":400,"content_type":"application/json","required":["error"]}}
+  ],
+  "cleanup": {"method":"DELETE","path":"/api/me","role":"demo_cookie_session","expect":{"status":200,"content_type":"application/json","required":["ok"]}}
+}

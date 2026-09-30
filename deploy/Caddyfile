@@ -1,4 +1,12 @@
 xn--e1agiq1a.xn--p1ai, www.xn--e1agiq1a.xn--p1ai, helpi.135-106-219-68.sslip.io {
     encode zstd gzip
-    reverse_proxy app:3210
+    handle /api-test {
+        redir /api-test/api 302
+    }
+    handle_path /api-test/* {
+        reverse_proxy app-test:3210
+    }
+    handle {
+        reverse_proxy app:3210
+    }
 }

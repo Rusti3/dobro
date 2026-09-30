@@ -34,18 +34,20 @@ export function createStore(pool) {
     pool,
 
     async user(id) {
-      const result = await pool.query("select id, name, data, name_ciphertext, data_ciphertext, garden_intro_seen from app_users where id = $1", [id]);
+      const result = await pool.query("select id, name, data, name_ciphertext, data_ciphertext, garden_intro_seen, location_prompt_seen from app_users where id = $1", [id]);
       const row = result.rows[0];
       if (!row) return null;
       const data = row.data_ciphertext ? decryptJson(row.data_ciphertext, `app_users:${id}:data`) : (row.data || {});
       data.name = row.name_ciphertext ? decryptText(row.name_ciphertext, `app_users:${id}:name`) : (data.name || row.name);
       data.gardenIntroSeen = row.garden_intro_seen;
+      data.locationPromptSeen = row.location_prompt_seen;
       return data;
     },
 
     async saveUser(user) {
       const persisted = { ...user };
       delete persisted.gardenIntroSeen;
+      delete persisted.locationPromptSeen;
       delete persisted.sharedLocation;
       if (persisted.recommendation) persisted.recommendation = { ...persisted.recommendation, interactions: [] };
       const encrypted = encryptionEnabled();
@@ -66,6 +68,15 @@ export function createStore(pool) {
 
     async markGardenIntroSeen(id) {
       await pool.query("update app_users set garden_intro_seen = true where id = $1", [id]);
+    },
+
+    async markLocationPromptSeen(id) {
+      await pool.query("update app_users set location_prompt_seen = true where id = $1", [id]);
+    },
+
+    async expireDemoProfiles(days) {
+      const result = await pool.query("delete from app_users where id like 'demo:%' and updated_at < now() - $1::integer * interval '1 day'", [days]);
+      return result.rowCount;
     },
 
     async users() {
@@ -141,13 +152,14 @@ export function createStore(pool) {
           if (result.rowCount) await client.query(`update recommendation_interactions set payload_ciphertext=$2 where id=$1`,
             [result.rows[0].id, encryptJson(item, `recommendation_interactions:${id}:${result.rows[0].id}:payload`)]);
           await client.query("commit");
+          return result.rowCount === 1;
         } catch (error) { await client.query("rollback"); throw error; }
         finally { client.release(); }
-        return;
       }
-      await pool.query(`insert into recommendation_interactions(user_id,event_id,action,context,idempotency_key,feature_version,features,occurred_at)
+      const result = await pool.query(`insert into recommendation_interactions(user_id,event_id,action,context,idempotency_key,feature_version,features,occurred_at)
         values($1,$2,$3,$4,$5,2,$6::jsonb,$7::timestamptz) on conflict(user_id,idempotency_key) do nothing`,
       [id,item.eventId,item.action,item.context,item.key,JSON.stringify(item.features || {}),item.at]);
+      return result.rowCount === 1;
     },
 
     async snapshotInteraction(id,item) {

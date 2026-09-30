@@ -16,16 +16,24 @@ try {
     page.on('response',r=>{if(r.status()>=400 && /garden-assets|theme-images/.test(r.url()))missing.push(r.url());});
     await page.route('https://st.max.ru/js/max-web-app.js',r=>r.fulfill({contentType:'application/javascript',body:''}));
     try {
-      await page.goto(url);
+      await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
       await page.locator('.interest-panel').waitFor();
       assert.equal(await page.locator('.registration-screen').count(),0);
       assert.equal(new Set(await page.locator('.interest-image').evaluateAll(nodes=>nodes.map(n=>getComputedStyle(n).backgroundImage))).size,14);
       await page.getByRole('button',{name:'Настроить ленту'}).click();
-      for(let i=0;i<6;i++) await page.getByRole('button',{name:'Мне подходит',exact:true}).click();
+      await page.getByRole('button',{name:'Нет, впервые'}).click();
+      for(let i=0;i<6;i++) {
+        await page.getByRole('button',{name:'Мне подходит',exact:true}).click();
+        if(i<5) await page.locator('.swipe-count').getByText(`${i+2} / 6`).waitFor();
+      }
       const age=page.getByRole('dialog',{name:'Сколько тебе лет?'});
       await age.getByLabel('Возраст',{exact:true}).fill('23');
       await age.getByRole('button',{name:'Сохранить',exact:true}).click();
       await age.waitFor({state:'detached'});
+      const locationPrompt=page.getByRole('dialog',{name:'Показать дела рядом?'});
+      await locationPrompt.waitFor();
+      await locationPrompt.getByRole('button',{name:'Не сейчас'}).click();
+      await locationPrompt.waitFor({state:'detached'});
       await page.getByRole('button',{name:'Профиль',exact:true}).first().click();
       const intro=page.getByRole('dialog',{name:'Твой сад'});await intro.waitFor();
       assert.equal(await page.locator('html').getAttribute('data-theme'),theme);
@@ -51,7 +59,7 @@ try {
       await page.waitForLoadState('networkidle');
       await page.screenshot({path:`test-results/garden/completed-${theme}.png`});
       const other=await browser.newContext({storageState:await context.storageState(),viewport:{width:430,height:932},colorScheme:theme});
-      const otherPage=await other.newPage();await otherPage.goto(url);await otherPage.getByRole('button',{name:'Профиль',exact:true}).first().click();
+      const otherPage=await other.newPage();await otherPage.goto(url,{waitUntil:'domcontentloaded',timeout:60000});await otherPage.getByRole('button',{name:'Профиль',exact:true}).first().click();
       await otherPage.locator('.profile-hud-deeds strong').waitFor();
       assert.equal(await otherPage.locator('.garden-intro').count(),0);
       assert.equal(await otherPage.locator('.profile-hud-deeds strong').textContent(),'1');

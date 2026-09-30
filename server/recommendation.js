@@ -1,8 +1,6 @@
 import { eventFeatures, exclusiveSections, recommendationViewV2 } from './recommendation-v2.js';
-export const themeIds = [
-  "animals", "ecology", "elderly", "children", "city", "creativity", "activity",
-  "education", "events", "online_help", "donation", "recycling", "nature", "charity",
-];
+import { themeIds } from '../shared/theme-ids.js';
+export { themeIds } from '../shared/theme-ids.js';
 
 const traitDimensions = [
   "format_online", "format_offline", "social_solo", "social_group",
@@ -74,18 +72,19 @@ export function affinity(vector, event) {
 
 const live = (event, now = Date.now()) => Date.parse(event.endsAt) > now;
 const recommendable = (event) => !["hidden", "human_review"].includes(event.annotation?.quality?.status);
-const editorialScore = (event) => {
+const editorialScore = (event, experience) => {
   const annotation = event.annotation;
   if (!annotation) return 0;
   const firstTime = (annotation.firstTime?.score ?? 50) / 100;
   const complexity = annotation.complexity?.overall;
   const quality = annotation.quality?.status === "suitable" ? 0.07 : 0.015;
   const ease = complexity === null || complexity === undefined ? 0 : complexity <= 39 ? 0.05 : complexity >= 60 ? -0.05 : 0;
-  return quality + firstTime * 0.12 + ease;
+  const beginnerWeight = experience === 'first_time' ? .25 : experience === 'experienced' ? .04 : .12;
+  return quality + firstTime * beginnerWeight + ease;
 };
-const ranked = (catalog, vector, seed, excluded = new Set()) => catalog
+const ranked = (catalog, vector, seed, excluded = new Set(), experience = null) => catalog
   .filter((event) => live(event) && recommendable(event) && !excluded.has(event.id))
-  .map((event) => ({ event, score: affinity(vector, event) + editorialScore(event) + (stableNumber(`${seed}:${event.id}`) % 1000) / 100000 }))
+  .map((event) => ({ event, score: affinity(vector, event) + editorialScore(event, experience) + (stableNumber(`${seed}:${event.id}`) % 1000) / 100000 }))
   .sort((a, b) => b.score - a.score);
 
 function takeDiverse(pool, count, used, output, reason) {
@@ -101,10 +100,10 @@ function takeDiverse(pool, count, used, output, reason) {
 
 const CALIBRATION_TARGET = 6;
 
-export function calibrationBatch(catalog, vector, interests, userId, target = CALIBRATION_TARGET) {
+export function calibrationBatch(catalog, vector, interests, userId, target = CALIBRATION_TARGET, experience = null) {
   const selected = new Set(interests);
   const seed = `calibration:${userId}:${interests.join(",")}`;
-  const pool = ranked(catalog, vector, seed);
+  const pool = ranked(catalog, vector, seed, new Set(), experience);
   const used = new Set(), output = [];
   takeDiverse(pool.filter(({ event }) => selected.has(event.theme)), Math.min(3, target), used, output, "По твоим интересам");
   takeDiverse(pool.filter(({ event }) => !selected.has(event.theme) && event.themes?.some((theme) => selected.has(theme))), Math.min(4, target), used, output, "Соседняя тема");
@@ -123,7 +122,7 @@ export function resetRecommendation(user, catalog, interests) {
     version: 1,
     vector,
     interactions: [],
-    calibration: calibrationBatch(catalog, vector, interests, user.id),
+    calibration: calibrationBatch(catalog, vector, interests, user.id, CALIBRATION_TARGET, user.profile?.volunteerExperience),
     days: {},
   };
   return user;
@@ -133,14 +132,31 @@ function ensureModel(user, catalog) {
   const interests = (user.profile?.interests || []).filter((id) => themeIds.includes(id));
   if (!user.recommendation) {
     const vector = initialVector(interests);
-    user.recommendation = { version: 1, vector, interactions: [], calibration: calibrationBatch(catalog, vector, interests, user.id), days: {} };
+    user.recommendation = { version: 1, vector, interactions: [], calibration: calibrationBatch(catalog, vector, interests, user.id, CALIBRATION_TARGET, user.profile?.volunteerExperience), days: {} };
   }
   user.recommendation.interactions ||= [];
-  user.recommendation.calibration ||= calibrationBatch(catalog, user.recommendation.vector || initialVector(interests), interests, user.id);
+  user.recommendation.calibration ||= calibrationBatch(catalog, user.recommendation.vector || initialVector(interests), interests, user.id, CALIBRATION_TARGET, user.profile?.volunteerExperience);
+  // The interaction table, rather than the cached model, is authoritative after retries or failed profile saves.
+  const events = new Map(catalog.map(event => [event.id, event]));
+  let rebuilt = initialVector(interests);
+  for (const item of user.recommendation.interactions) {
+    if (!['like', 'skip', 'plan', 'completed'].includes(item.action)) continue;
+    const event = events.get(item.eventId) || {
+      id: item.eventId, theme: item.features?.themes?.[0], themes: item.features?.themes || [],
+      traits: { format: item.features?.format?.includes('online') ? 'online' : 'offline' },
+    };
+    const strength = item.action === 'plan' ? .35 : item.action === 'completed' ? .45 : undefined;
+    rebuilt = applyFeedback(rebuilt, event, item.action === 'skip' ? 'skip' : 'like', strength);
+  }
+  user.recommendation.vector = rebuilt;
   // Existing twelve-card journeys keep their first reactions and finish after card six.
   if (user.recommendation.calibration.length > CALIBRATION_TARGET)
     user.recommendation.calibration = user.recommendation.calibration.slice(0, CALIBRATION_TARGET);
   user.recommendation.days ||= {};
+  for (const [day, batch] of Object.entries(user.recommendation.days)) {
+    batch.feedback = user.recommendation.interactions.filter(item => item.context === 'daily' && item.key?.includes(`:${day}:`))
+      .map(item => ({ eventId: item.eventId, action: item.action }));
+  }
   return user.recommendation;
 }
 
@@ -148,8 +164,8 @@ function dailyBatch(user, catalog, day) {
   const model = ensureModel(user, catalog);
   if (!model.days[day]) {
     const seen = new Set(model.interactions.slice(-120).map((item) => item.eventId));
-    let pool = ranked(catalog, model.vector, `${user.id}:${day}`, seen);
-    if (pool.length < 4) pool = ranked(catalog, model.vector, `${user.id}:${day}`);
+    let pool = ranked(catalog, model.vector, `${user.id}:${day}`, seen, user.profile?.volunteerExperience);
+    if (pool.length < 4) pool = ranked(catalog, model.vector, `${user.id}:${day}`, new Set(), user.profile?.volunteerExperience);
     const ids = [], themes = new Set();
     for (const { event } of pool) {
       if (ids.length >= 4) break;
@@ -212,7 +228,7 @@ export function recommendationView(user,catalog,day=moscowDay(),options={}) {
     const available=new Set(catalog.map(item=>item.id));
     const prior=model.calibration.filter(item=>reacted.has(item.id)||available.has(item.id));
     const included=new Set(prior.map(item=>item.id));
-    const additional=calibrationBatch(catalog,model.vector,user.profile?.interests||[],user.id)
+    const additional=calibrationBatch(catalog,model.vector,user.profile?.interests||[],user.id,CALIBRATION_TARGET,user.profile?.volunteerExperience)
       .filter(item=>!included.has(item.id));
     model.calibration=[...prior,...additional].slice(0,CALIBRATION_TARGET);
     user.onboarded=false;
@@ -234,7 +250,7 @@ export function recordFeedback(user, catalog, { eventId, action, context, planId
   const strength = context === "plan" ? 0.35 : context === "visit" ? 0.45 : undefined;
   if (['like','skip'].includes(action)) model.vector = applyFeedback(model.vector, event, action, strength);
   model.interactions.push(interaction);
-  if (context === "daily") dailyBatch(user, catalog, day).feedback.push({ eventId: event.id, action });
+  if (context === "daily") dailyBatch(user, catalog, day);
   if (context === "calibration" && new Set(model.interactions.filter((item) => item.context === "calibration").map(item=>item.eventId)).size >= model.calibration.length) user.onboarded = true;
   return user;
 }

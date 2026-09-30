@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const root = path.resolve(process.argv[2] || '.');
+const root = path.resolve(process.argv.slice(2).find(argument => !argument.startsWith('--')) || '.');
 const history = process.argv.includes('--history');
+const gitExecutable = process.env.GIT_EXE || 'git';
 const findings = [];
 const textFile = name => /\.(?:js|jsx|mjs|json|ya?ml|md|txt|sh|sql|toml|pem)$|(?:^|\/)\.env(?:\..*)?$|Dockerfile$/i.test(name);
 function check(name, content, revision = 'working-tree') {
@@ -22,9 +23,9 @@ function check(name, content, revision = 'working-tree') {
   }
 }
 if (history) {
-  const objects = execFileSync('git', ['rev-list','--objects','--all'], {cwd:root,encoding:'utf8'}).trim().split('\n')
+  const objects = execFileSync(gitExecutable, ['rev-list','--objects','--all'], {cwd:root,encoding:'utf8'}).trim().split('\n')
     .map(line => [line.slice(0,40),line.slice(41)]).filter(([,name])=>name && textFile(name));
-  const batch = execFileSync('git', ['cat-file','--batch'], {cwd:root,input:objects.map(([id])=>id).join('\n')+'\n',maxBuffer:100*1024*1024});
+  const batch = execFileSync(gitExecutable, ['cat-file','--batch'], {cwd:root,input:objects.map(([id])=>id).join('\n')+'\n',maxBuffer:100*1024*1024});
   let offset = 0;
   for (const [id,name] of objects) {
     const end = batch.indexOf(10,offset);

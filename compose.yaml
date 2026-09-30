@@ -21,6 +21,7 @@ x-app-environment: &app-environment
   LLM_BASE_URL: ${DOCKER_LLM_BASE_URL:-}
   LLM_MODEL: ${LLM_MODEL:-gpt-6-luna}
   RECOMMENDATION_V2_ENABLED: ${RECOMMENDATION_V2_ENABLED:-true}
+  RECSYS_URL: http://recsys:3211
   CATALOG_CITIES: ${CATALOG_CITIES:-Москва,Санкт-Петербург,Казань,Рыбинск}
   CATALOG_SYNC_ENABLED: ${CATALOG_SYNC_ENABLED:-false}
   CATALOG_SYNC_ON_START: ${CATALOG_SYNC_ON_START:-false}
@@ -63,8 +64,11 @@ services:
     environment: *app-environment
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks: [default, recsys]
     depends_on:
       postgres:
+        condition: service_healthy
+      recsys:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -79,10 +83,32 @@ services:
     environment: *app-environment
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks: [default, recsys]
     depends_on:
       postgres:
         condition: service_healthy
+      recsys:
+        condition: service_healthy
     restart: unless-stopped
+
+  recsys:
+    image: ${APP_IMAGE:-dobrie-dela-max:local}
+    command: ["node", "server/recsys-service.js"]
+    environment:
+      NODE_ENV: production
+      RECSYS_HOST: 0.0.0.0
+      RECSYS_PORT: 3211
+    restart: unless-stopped
+    networks: [recsys]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3211/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
 volumes:
   postgres-data:
+
+networks:
+  recsys:
+    internal: true

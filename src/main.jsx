@@ -416,6 +416,24 @@ function AgePrompt({ value, onChange, onSave, onLater, busy, error }) {
     </form>
   </dialog>;
 }
+function LocationPrompt({ onClose, onShare, busy }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element.showModal();
+    return () => element.close();
+  }, []);
+  return <dialog ref={dialog} className="age-prompt location-prompt" aria-labelledby="location-prompt-title"
+    onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
+    onClick={event => { if (event.target === dialog.current && !busy) onClose(); }}>
+    <div className="location-prompt-content">
+      <h2 id="location-prompt-title">Показать дела рядом?</h2>
+      <p>Поделись геопозицией, и мы покажем подходящие дела поблизости. Это необязательно.</p>
+      <button className="primary" disabled={busy} onClick={onShare}>Поделиться геопозицией</button>
+      <button className="text-button" disabled={busy} onClick={onClose}>Не сейчас</button>
+    </div>
+  </dialog>;
+}
 function App() {
   const [data, setData] = useState(null),
     [fatal, setFatal] = useState(""),
@@ -424,6 +442,8 @@ function App() {
     [onboard, setOnboard] = useState(false),
     [profile, setProfile] = useState({ category: "all", barrier: "company" }),
     [interestSelection, setInterestSelection] = useState([]),
+    [experiencePrompt, setExperiencePrompt] = useState(false),
+    [locationDismissed, setLocationDismissed] = useState(false),
     [toast, setToastMessage] = useState(""),
     [toastError, setToastError] = useState(false),
     [busy, setBusy] = useState(false),
@@ -648,6 +668,16 @@ function App() {
   async function save(patch) {
     await api("/profile", "PATCH", patch);
     await load();
+  }
+  async function closeLocationPrompt(share = false) {
+    setLocationDismissed(true);
+    try {
+      await api('/onboarding/location-intro-seen', 'POST', {});
+      if (share) await shareLocationFromFeed();
+    } catch (error) {
+      setLocationDismissed(false);
+      setToast(error.message, true);
+    }
   }
   async function sharePlanInMax(planId, eventId = null) {
     if (!maxInitData() || typeof maxApp?.shareMaxContent !== 'function')
@@ -1313,6 +1343,16 @@ function App() {
         </div>
       </>
     );
+  else if (experiencePrompt)
+    content = <div className="interest-onboarding experience-onboarding" role="dialog" aria-modal="true" aria-labelledby="experience-title">
+      <section className="interest-panel experience-panel">
+        <div className="interest-copy"><h1 id="experience-title">Ты уже участвовал(а) в волонтёрских делах?</h1><p>Это поможет подобрать первые карточки. Ответ можно изменить позже.</p></div>
+        <div className="experience-actions">
+          <button className="primary" disabled={busy} onClick={() => act(async () => { await api('/profile', 'PATCH', { interests: interestSelection, volunteerExperience: 'experienced' }); await load(); setFeedLimit(12); setExperiencePrompt(false); setOnboard(false); go('home'); })}>Да</button>
+          <button className="secondary" disabled={busy} onClick={() => act(async () => { await api('/profile', 'PATCH', { interests: interestSelection, volunteerExperience: 'first_time' }); await load(); setFeedLimit(12); setExperiencePrompt(false); setOnboard(false); go('home'); })}>Нет, впервые</button>
+        </div>
+      </section>
+    </div>;
   else if (onboard)
     content = (
       <div className="interest-onboarding" role="dialog" aria-modal="true" aria-labelledby="interest-title">
@@ -1329,7 +1369,7 @@ function App() {
               </button>;
             })}
           </div>
-          <div className="interest-actions"><span>Выбрано: {interestSelection.length}</span><button className="primary" disabled={busy} onClick={() => act(async () => { await api("/profile", "PATCH", { interests: interestSelection }); await load(); setFeedLimit(12); setOnboard(false); go("home"); })}>Настроить ленту <ArrowRight size={18} /></button></div>
+          <div className="interest-actions"><span>Выбрано: {interestSelection.length}</span><button className="primary" disabled={busy} onClick={() => { if (!data.user.profile?.volunteerExperience && !data.user.interestOnboarded) { setExperiencePrompt(true); return; } act(async () => { await api("/profile", "PATCH", { interests: interestSelection }); await load(); setFeedLimit(12); setOnboard(false); go("home"); }); }}>Настроить ленту <ArrowRight size={18} /></button></div>
         </section>
       </div>
     );
@@ -1424,7 +1464,7 @@ function App() {
     return <div className="profile-garden-shell">{content}<BottomNav garden /></div>;
   if (tab === "map" && cleanScreen)
     return <div className="map-only-shell"><MapErrorBoundary><Suspense fallback={<div className="map-loading">Открываем карту…</div>}><VolunteerMap key={selectedCity} events={mapEvents} center={selectedCityOption.center} botUsername={data.botUsername} userName={data.user.name} userPhotoUrl={data.maxProfile?.photoUrl} onSelect={openDetail}/></Suspense></MapErrorBoundary><BottomNav garden /></div>;
-  if (onboard && !detail && !settings)
+  if ((onboard || experiencePrompt) && !detail && !settings)
     return <div className="interest-only-shell">{content}{toast && <div className={`toast${toastError ? ' toast-error' : ''}`} role={toastError ? 'alert' : 'status'}>{toastError ? <X size={18}/> : <Check size={18}/>}<span>{toast}</span><button aria-label="Закрыть уведомление" onClick={() => setToast("")}><X size={20}/></button></div>}</div>;
   if (tab === "home" && cleanScreen && recommendations.stage === "calibration")
     return <div className="swipe-only-shell">{renderSwipeExperience()}{toast && <div className={`toast${toastError ? ' toast-error' : ''}`} role={toastError ? 'alert' : 'status'}>{toastError ? <X size={18}/> : <Check size={18}/>}<span>{toast}</span><button aria-label="Закрыть уведомление" onClick={() => setToast("")}><X size={20}/></button></div>}</div>;
@@ -1503,6 +1543,7 @@ function App() {
       </div>
       <BottomNav />
       {tab === 'home' && cleanScreen && recommendations.stage === 'feed' && !ageDismissed && !(Number.isInteger(Number(profile.age)) && Number(profile.age) >= 7 && Number(profile.age) <= 100) && <AgePrompt value={registrationAge} onChange={setRegistrationAge} busy={busy} error={ageError} onLater={() => setAgeDismissed(true)} onSave={age => act(async () => { setAgeError(''); try { await save({ age }); setToast('Возраст сохранён'); } catch (error) { setAgeError(error.message); throw error; } })} />}
+      {tab === 'home' && cleanScreen && recommendations.stage === 'feed' && Number.isInteger(Number(profile.age)) && Number(profile.age) >= 7 && Number(profile.age) <= 100 && !data.user.locationPromptSeen && !locationDismissed && <LocationPrompt busy={busy} onClose={() => closeLocationPrompt(false)} onShare={() => closeLocationPrompt(true)} />}
       {toast && (
         <div className={`toast${toastError ? ' toast-error' : ''}`} role={toastError ? 'alert' : 'status'}>
           {toastError ? <X size={18} /> : <Check size={18} />}

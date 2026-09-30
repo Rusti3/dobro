@@ -2,9 +2,10 @@ openapi: 3.0.3
 info:
   title: хелпи API
   version: 2026.09.30
-  description: API мини-приложения MAX. Публичны документация и проверка работы; личные методы требуют подпись MAX. Локальное демо использует отдельную HttpOnly cookie-сессию.
+  description: API мини-приложения MAX. Production-личные методы требуют подпись MAX. Изолированное HTTPS-демо /api-test использует отдельную БД и HttpOnly cookie-сессию без токенов.
 servers:
   - url: /
+  - url: /api-test
 security:
   - maxInitData: []
 paths:
@@ -80,6 +81,13 @@ paths:
       responses:
         '200': {description: Saved, content: {application/json: {schema: {type: object, required: [seen], properties: {seen: {type: boolean, enum: [true]}}}}}}
         '401': {description: Invalid or absent MAX authentication}
+  /api/onboarding/location-intro-seen:
+    post:
+      description: Atomically remembers that the voluntary location prompt was closed. Repeated calls are safe; this method does not request coordinates.
+      responses:
+        '200': {description: Saved, content: {application/json: {schema: {type: object, required: [seen], properties: {seen: {type: boolean, enum: [true]}}}}}}
+        '401': {description: Invalid or absent MAX authentication}
+        '503': {description: RecSys temporarily unavailable}
   /api/events/{eventId}:
     get:
       description: Opens an active age-eligible event from the daily MAX digest, including events outside the selected city.
@@ -220,6 +228,7 @@ components:
         city: {type: string, enum: [Москва, Санкт-Петербург, Казань, Рыбинск]}
         interests: {type: array, maxItems: 14, items: {type: string}}
         age: {type: integer, minimum: 7, maximum: 100, description: Optional age collected after calibration; does not reset recommendations.}
+        volunteerExperience: {type: string, enum: [first_time, experienced], description: Asked after topic selection and before six calibration swipes. Existing profiles remain unset.}
         registration:
           type: object
           required: [name, age]
@@ -259,7 +268,16 @@ components:
       type: object
       required: [user, plans, catalog, recommendations, location, mode]
       properties:
-        user: {type: object, properties: {gardenIntroSeen: {type: boolean}}}
+        user:
+          type: object
+          properties:
+            gardenIntroSeen: {type: boolean}
+            locationPromptSeen: {type: boolean}
+            profile:
+              type: object
+              properties:
+                age: {type: integer, nullable: true}
+                volunteerExperience: {type: string, nullable: true, enum: [first_time, experienced]}
         plans: {type: array, items: {type: object}}
         catalog: {type: array, items: {type: object}}
         recommendations: {type: object}

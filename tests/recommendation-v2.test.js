@@ -19,6 +19,18 @@ test('all seven complexity dimensions are used, unknown is not easy',()=>{
   assert.equal(eventFeatures(e).loads.length,6);
   assert.ok(scoreEvent(event('1'),preferenceProfile(user(),[],now))>scoreEvent(e,preferenceProfile(user(),[],now)));
 });
+test('volunteer experience changes ordering without bypassing age and quality gates',()=>{
+  const easy=event('easy');easy.theme='ecology';easy.themes=['ecology'];easy.annotation.firstTime.score=100;
+  const preferred=event('preferred');preferred.annotation.firstTime.score=0;
+  const beginner=user();beginner.profile.volunteerExperience='first_time';
+  const experienced=user();experienced.profile.volunteerExperience='experienced';
+  const beginnerCandidates=projectCandidates([easy,preferred],beginner,{now}).sort((a,b)=>b._score-a._score);
+  const experiencedCandidates=projectCandidates([easy,preferred],experienced,{now}).sort((a,b)=>b._score-a._score);
+  assert.equal(beginnerCandidates[0].id,'easy');
+  assert.equal(experiencedCandidates[0].id,'preferred');
+  easy.annotation.quality.status='hidden';
+  assert.deepEqual(projectCandidates([easy,preferred],beginner,{now}).map(item=>item.id),['preferred']);
+});
 test('strongest signal wins, cancellation removes plan and old evidence decays',()=>{
   const at=new Date(now).toISOString();
   const list=[{eventId:'1',action:'open_detail',at},{eventId:'1',action:'like',at},{eventId:'1',action:'plan',at}];

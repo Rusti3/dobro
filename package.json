@@ -13,6 +13,7 @@
     "build": "vite build",
     "start": "node --env-file-if-exists=.env server/index.js",
     "worker": "node --env-file-if-exists=.env server/worker.js",
+    "recsys": "node --env-file-if-exists=.env server/recsys-service.js",
     "db:migrate": "node --env-file-if-exists=.env scripts/db-migrate.js",
     "catalog:sync": "node --env-file-if-exists=.env scripts/run-catalog-sync.js",
     "annotations:queue": "node --env-file-if-exists=.env scripts/run-annotation-queue.js",
@@ -23,6 +24,7 @@
     "bot:setup": "node --env-file-if-exists=.env scripts/setup-bot.js",
     "webhook:setup": "node --env-file-if-exists=.env scripts/setup-webhook.js",
     "test:demo": "node scripts/test-demo-api.mjs",
+    "test:data-api": "node scripts/check-data-api.mjs",
     "test:ui": "node scripts/test-garden-ui.mjs",
     "test:api-docs": "node scripts/test-swagger-ui.mjs",
     "secrets:check": "node scripts/check-secrets.mjs"

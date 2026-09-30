@@ -81,7 +81,7 @@ function allowed(event,user,city,now,ignoreAge=false) {
     && matchesCity(event,city);
 }
 
-export function scoreEvent(event,profile) {
+export function scoreEvent(event,profile,experience = null) {
   const features = eventFeatures(event);
   let fit = 0;
   for (const [group,weight] of Object.entries(GROUP_WEIGHTS)) {
@@ -91,6 +91,9 @@ export function scoreEvent(event,profile) {
   const a = event.annotation;
   const first = Number.isFinite(a?.firstTime?.score) ? a.firstTime.score/100 : 0;
   const quality = a?.quality?.status==='suitable' ? 1 : a?.quality?.status==='clarification_required' ? .4 : 0;
+  // Unknown experience retains the previous ranking. Explicit beginners favor verified ease of entry.
+  if (experience === 'first_time') return .55*fit + .30*first + .15*quality;
+  if (experience === 'experienced') return .77*fit + .08*first + .15*quality;
   return .65*fit + .2*first + .15*quality;
 }
 
@@ -106,7 +109,7 @@ export function projectCandidates(catalog,user,options={}) {
       const effectiveMinimumAge = event.annotation?.facts?.minimumAge ?? event.age ?? null;
       const online = event.annotation?.format==='online' || (!event.annotation && event.traits?.format==='online');
       const km = online ? null : distanceKm(location,event);
-      const score = scoreEvent(event,profile);
+      const score = scoreEvent(event,profile,user.profile?.volunteerExperience);
       const contextScore = location ? .9*score+.1*(km===null?.5:Math.exp(-km/10)) : score;
       return { ...safe, age: effectiveMinimumAge, distanceKm: km===null?null:Math.round(km*10)/10, _distanceKm:km, _score:contextScore };
     }).sort((a,b)=>b._score-a._score || String(a.selectedVacancyId).localeCompare(String(b.selectedVacancyId)));
@@ -191,7 +194,7 @@ export function recommendationViewV2(user,catalog,day,options={}) {
   const now=options.now??Date.now();
   const model=user.recommendation;
   const profile=preferenceProfile(user,catalog,now);
-  const pool=[...catalog].sort((a,b)=>(b._score??scoreEvent(b,profile))-(a._score??scoreEvent(a,profile)) || hash(`${user.id}:${day}:${a.id}`)-hash(`${user.id}:${day}:${b.id}`));
+  const pool=[...catalog].sort((a,b)=>(b._score??scoreEvent(b,profile,user.profile?.volunteerExperience))-(a._score??scoreEvent(a,profile,user.profile?.volunteerExperience)) || hash(`${user.id}:${day}:${a.id}`)-hash(`${user.id}:${day}:${b.id}`));
   const signals=effectiveSignals(model.interactions||[],now);
   const unavailable=new Set(signals.filter(x=>['completed','plan'].includes(x.action)).map(x=>x.eventId));
   const recent=new Set(signals.filter(x=>now-Date.parse(x.at)<7*86400000).map(x=>x.eventId));
@@ -209,7 +212,7 @@ export function recommendationViewV2(user,catalog,day,options={}) {
       const keys=[...f.tasks.map(x=>['tasks',x]),...f.themes.map(x=>['themes',x])];
       return keys.length ? keys.filter(([group,key])=>!profile.seen(group,key)).length/keys.length : 0;
     };
-    exploratory.sort((a,b)=>(.7*(b._score??scoreEvent(b,profile))+.3*novelty(b))-(.7*(a._score??scoreEvent(a,profile))+.3*novelty(a)));
+    exploratory.sort((a,b)=>(.7*(b._score??scoreEvent(b,profile,user.profile?.volunteerExperience))+.3*novelty(b))-(.7*(a._score??scoreEvent(a,profile,user.profile?.volunteerExperience))+.3*novelty(a)));
     const all=diverse(exploratory.length?exploratory:dailyPool,4,picks);
     daily=model.days[day]={context,ids:all.map(e=>e.id),feedback:daily?.feedback||[]};
     for(const old of Object.keys(model.days).sort().slice(0,-14)) delete model.days[old];
