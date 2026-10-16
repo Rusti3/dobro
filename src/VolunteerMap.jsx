@@ -342,7 +342,7 @@ export default function VolunteerMap({ events, onSelect, center = [37.6173, 55.7
       () => {
         setLocating(false);
         setError(
-          "Не удалось определить местоположение. Разреши геопозицию в настройках MAX.",
+          "Не удалось определить местоположение. Разреши доступ к геопозиции в настройках приложения или браузера.",
         );
       },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },

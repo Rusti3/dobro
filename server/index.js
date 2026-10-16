@@ -17,6 +17,7 @@ import { loadRecommendationContext } from './recommendation-context.js';
 import { recsys, recsysHealth } from './recsys-client.js';
 import { migratePrivateData, requirePrivateDataKey } from './private-data.js';
 import { demoDataEnabled, seedDemoCatalog, seedDemoPlan } from './demo-data.js';
+import { BROWSER_SESSION_SECONDS, sessionHash, newSessionToken, readBrowserSession, setBrowserSession, requestLimiter } from './browser-session.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const swaggerAssets = swaggerUiDist.getAbsoluteFSPath();
 const pool = createPool({ applicationName: "dobrie_dela_web" });
@@ -29,6 +30,13 @@ if (demoDataEnabled()) await seedDemoCatalog(pool);
 else await catalogRepository.seedFromBundledCatalog();
 const dev = process.argv.includes("--dev");
 const demo = process.env.DEMO_MODE !== "false";
+const browserAccess = process.env.BROWSER_ACCESS_ENABLED !== 'false';
+const browserRequests = requestLimiter({ limit: 300, windowMs: 60000 });
+const browserCreation = requestLimiter({ limit: 40, windowMs: 15 * 60000 });
+if (browserAccess && !demo) {
+  await store.expireBrowserSessions();
+  setInterval(() => store.expireBrowserSessions().catch(error => console.error('Session cleanup:', error.message)), 6 * 3600_000).unref();
+}
 const token = demo ? undefined : process.env.MAX_BOT_TOKEN;
 const appUrl = (process.env.MAX_MINI_APP_URL || "").trim().replace(/\/+$/, "");
 const botUsername = process.env.MAX_BOT_USERNAME || "";
@@ -83,7 +91,7 @@ async function body(req) {
   }
 }
 async function user(req, res) {
-  let id, name;
+  let id, name, browserToken;
   const init = req.headers["x-max-init-data"];
   if (init) {
     try {
@@ -91,6 +99,7 @@ async function user(req, res) {
       id = `max:${u.id}`;
       req.maxProfile = maxProfile(u);
       name = req.maxProfile.firstName || "Друг";
+      req.identity = 'max';
     } catch (e) {
       fail(e.message, 401);
     }
@@ -109,6 +118,17 @@ async function user(req, res) {
     }
     id = `demo:${session}`;
     name = "Друг";
+    req.identity = 'demo';
+  } else if (browserAccess) {
+    req.identity = 'browser';
+    const token = readBrowserSession(req);
+    id = token ? await store.browserSession(sessionHash(token)) : null;
+    if (!id) {
+      if (!browserCreation(req.clientAddress)) fail('Слишком много новых профилей. Попробуй немного позже.', 429);
+      id = `web:${randomUUID()}`;
+      browserToken = newSessionToken();
+    }
+    name = 'Друг';
   } else fail("Откройте приложение из MAX.", 401);
   let u = await store.user(id);
   if (!u) {
@@ -119,15 +139,19 @@ async function user(req, res) {
       registered: true,
       interestOnboarded: false,
       onboarded: false,
-      reminders: true,
+      reminders: req.identity !== 'browser',
+      dailyDigest: req.identity === 'browser' ? false : undefined,
       gardenIntroSeen: false,
       locationPromptSeen: false,
       createdAt: new Date().toISOString(),
     };
     await store.saveUser(u);
   }
-  // Identity is established by verified MAX initData (or the isolated demo cookie),
-  // not by asking the user to type their name and age.
+  if (browserToken) {
+    await store.createBrowserSession(sessionHash(browserToken), u.id, BROWSER_SESSION_SECONDS);
+    setBrowserSession(req, res, browserToken);
+  }
+  // Verified MAX identity, isolated demo cookie, or an opaque browser session.
   if (!u.registered) {
     u.registered = true;
     if (req.maxProfile) u.name = name;
@@ -146,9 +170,7 @@ const viewPlan = (p, u, catalog) => {
   };
 };
 async function mine(u, catalog) {
-  return (await store
-    .plans())
-    .filter((p) => p.owner === u.id || p.members.some((m) => m.id === u.id))
+  return (await store.plansForUser(u.id))
     .map((p) => viewPlan(p, u, catalog));
 }
 const rates = new Map();
@@ -165,6 +187,12 @@ const server = http.createServer(async (req, res) => {
       if (demoRates.size > 20000) for (const [address, value] of demoRates) if (now - value.start > 60000) demoRates.delete(address);
     }
     const url = new URL(req.url, "http://localhost");
+    req.clientAddress = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').at(-1).trim();
+    if (!demo && browserAccess && !req.headers['x-max-init-data'] && url.pathname.startsWith('/api/')
+      && !['/api/health','/api/max/webhook'].includes(url.pathname) && !browserRequests(req.clientAddress)) {
+      res.setHeader('Retry-After', '60');
+      return json(res, 429, { error: 'Слишком много запросов. Попробуй через минуту.' });
+    }
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     // MAX web embeds mini-apps; CSP below restricts permitted parent origins.
@@ -200,12 +228,13 @@ const server = http.createServer(async (req, res) => {
         "Content-Type",
         types[path.extname(file)] || "application/octet-stream",
       );
+      if (path.extname(file) === '.html') res.setHeader('Cache-Control', 'no-cache');
       return fs.createReadStream(file).pipe(res);
     }
     if (url.pathname === "/api" || url.pathname === "/api/") {
       if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-      return res.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>хелпи API</title><link rel="stylesheet" href="${apiPrefix}/api/swagger-ui/swagger-ui.css"><style>body{margin:0;background:#fafafa;color:#17212b;font-family:system-ui,sans-serif}.api-note{padding:14px 24px;background:#e9f5ed;border-bottom:1px solid #b6d5bd}.api-note a{color:#146c38}.api-note p{margin:6px 0 0}</style></head><body><div class="api-note"><strong>хелпи API</strong> · <a href="${apiPrefix}/api/health">Проверить работу</a> · <a href="${apiPrefix}/api/openapi.yaml">OpenAPI YAML</a><p>${apiPrefix ? 'Это изолированное демо: личные запросы работают через тестовую cookie без логина.' : 'Документация открыта вне MAX. Личные методы требуют подписанные данные запуска MAX; без них запросы вернут 401.'}</p></div><div id="swagger-ui"></div><script src="${apiPrefix}/api/swagger-ui/swagger-ui-bundle.js"></script><script src="${apiPrefix}/api/swagger-ui/init.js"></script></body></html>`);
+      return res.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>хелпи API</title><link rel="stylesheet" href="${apiPrefix}/api/swagger-ui/swagger-ui.css"><style>body{margin:0;background:#fafafa;color:#17212b;font-family:system-ui,sans-serif}.api-note{padding:14px 24px;background:#e9f5ed;border-bottom:1px solid #b6d5bd}.api-note a{color:#146c38}.api-note p{margin:6px 0 0}</style></head><body><div class="api-note"><strong>хелпи API</strong> · <a href="${apiPrefix}/api/health">Проверить работу</a> · <a href="${apiPrefix}/api/openapi.yaml">OpenAPI YAML</a><p>${apiPrefix ? 'Это изолированное демо: личные запросы работают через тестовую cookie без логина.' : browserAccess ? 'В браузере GET /api/bootstrap создаёт отдельный профиль и защищённую cookie-сессию. В MAX профиль определяется подписанным X-Max-Init-Data. Чужие профили и планы недоступны.' : 'Личные методы требуют подписанные данные запуска MAX.'}</p></div><div id="swagger-ui"></div><script src="${apiPrefix}/api/swagger-ui/swagger-ui-bundle.js"></script><script src="${apiPrefix}/api/swagger-ui/init.js"></script></body></html>`);
     }
     if (url.pathname === "/api/index.json") {
       if (req.method !== "GET") return json(res, 405, { error: "Метод не поддерживается." });
@@ -214,7 +243,7 @@ const server = http.createServer(async (req, res) => {
         version: process.env.APP_COMMIT || "local",
         openapi: `${apiPrefix}/api/openapi.yaml`,
         health: `${apiPrefix}/api/health`,
-        authentication: apiPrefix ? "Изолированное демо использует HttpOnly cookie без логина и MAX-токена." : "Личные методы требуют подписанные данные запуска MAX в заголовке X-Max-Init-Data.",
+        authentication: apiPrefix ? "Изолированное демо использует HttpOnly cookie без логина и MAX-токена." : browserAccess ? 'Браузер: HttpOnly cookie после GET /api/bootstrap. MAX: подписанный X-Max-Init-Data. Каждая сессия видит только свой профиль.' : "Личные методы требуют подписанные данные запуска MAX в заголовке X-Max-Init-Data.",
       });
     }
     if (url.pathname.startsWith("/api/swagger-ui/")) {
@@ -247,6 +276,7 @@ const server = http.createServer(async (req, res) => {
         ok: recommendationService.ok,
         version: process.env.APP_COMMIT || 'local',
         mode: demo || isLocalPreview(req) ? "demo" : "max",
+        browserAccess,
         transport: webhookUrl ? "webhook" : "polling",
         database,
         catalog,
@@ -266,6 +296,8 @@ const server = http.createServer(async (req, res) => {
     if (!["GET", "POST", "PATCH", "DELETE"].includes(req.method))
       fail("Метод не поддерживается.", 405);
     if (req.method !== "GET") {
+      if (!req.headers['x-max-init-data'] && req.headers['sec-fetch-site'] === 'cross-site')
+        fail('Недопустимый источник запроса.', 403);
       const origin = req.headers.origin;
       if (
         origin &&
@@ -326,7 +358,7 @@ const server = http.createServer(async (req, res) => {
         catalog: availableCatalog.map(publicEvent),
         location: activeLocation(location),
         recommendations: view.recommendations,
-         mode: demo || isLocalPreview(req) ? "demo" : "max",
+         mode: req.identity,
          botUsername: botUsername || null,
       });
     }
@@ -434,6 +466,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/me" && req.method === "DELETE") {
       await store.deleteUser(u.id);
+      if (req.identity === 'browser') {
+        setBrowserSession(req, res, null);
+        return json(res, 200, { ok: true });
+      }
       res.setHeader(
         "Set-Cookie",
         `first_session=; HttpOnly; SameSite=Lax; Path=${demoCookiePath}; Max-Age=0`,

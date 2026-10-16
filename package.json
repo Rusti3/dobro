@@ -26,6 +26,7 @@
     "test:demo": "node scripts/test-demo-api.mjs",
     "test:data-api": "node scripts/check-data-api.mjs",
     "test:ui": "node scripts/test-garden-ui.mjs",
+    "test:browser": "node scripts/test-browser-responsive.mjs",
     "test:api-docs": "node scripts/test-swagger-ui.mjs",
     "secrets:check": "node scripts/check-secrets.mjs"
   },

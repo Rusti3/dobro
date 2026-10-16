@@ -1,18 +1,20 @@
 openapi: 3.0.3
 info:
   title: хелпи API
-  version: 2026.09.30
-  description: API мини-приложения MAX. Production-личные методы требуют подпись MAX. Изолированное HTTPS-демо /api-test использует отдельную БД и HttpOnly cookie-сессию без токенов.
+  version: 2026.10.16
+  description: API сайта и мини-приложения MAX. В браузере GET /api/bootstrap создаёт самостоятельный профиль с HttpOnly cookie-сессией на 180 дней. В MAX используется подпись запуска; недействительная подпись не заменяется гостевым входом. Изолированное HTTPS-демо /api-test использует отдельную БД.
 servers:
   - url: /
   - url: /api-test
 security:
   - maxInitData: []
+  - browserSession: []
+  - demoSession: []
 paths:
   /api:
     get:
       security: []
-      description: Public Swagger UI. Personal endpoints still require MAX authentication.
+      description: Public Swagger UI. Personal endpoints use the browser session or signed MAX identity.
       responses:
         '200':
           description: Interactive API documentation
@@ -61,6 +63,7 @@ paths:
         '403': {description: Invalid webhook secret}
   /api/bootstrap:
     get:
+      description: Creates an anonymous browser profile if no session is present. Store the Set-Cookie header and send it on subsequent requests. Browser and MAX profiles are independent; user IDs are not credentials.
       responses:
         '200':
           description: Current user, plans, location and curated catalog
@@ -220,7 +223,17 @@ components:
       type: apiKey
       in: header
       name: X-Max-Init-Data
-      description: MAX WebApp.initData; server validates HMAC with MAX bot token. Demo mode uses HttpOnly first_session instead.
+      description: MAX WebApp.initData; server validates HMAC with MAX bot token. Invalid initData returns 401 even when a valid browser cookie exists.
+    browserSession:
+      type: apiKey
+      in: cookie
+      name: __Host-helpi_session
+      description: Issued automatically by GET /api/bootstrap over HTTPS; HttpOnly, Secure, SameSite=Lax, Path=/, 180 days. Only its SHA-256 hash is stored. Local HTTP uses helpi_session. Deleting the profile revokes the session.
+    demoSession:
+      type: apiKey
+      in: cookie
+      name: first_session
+      description: Isolated demo database only.
   schemas:
     ProfilePatch:
       type: object
@@ -282,4 +295,4 @@ components:
         catalog: {type: array, items: {type: object}}
         recommendations: {type: object}
         location: {nullable: true, type: object}
-        mode: {type: string, enum: [demo, max]}
+        mode: {type: string, enum: [demo, max, browser]}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHmac,randomInt} from 'node:crypto';
-const base=process.env.SMOKE_URL || 'https://helpi.135-106-219-68.sslip.io';
+const base=process.env.SMOKE_URL || 'https://хелпи.рф';
 let cookie='';
 const token=process.env.MAX_BOT_TOKEN;
 let initData='';
@@ -24,7 +24,7 @@ try {
   assert.equal(newcomer.user.registered,true);
   assert.equal(newcomer.recommendations.stage,'interests');
   assert.equal(newcomer.user.profile.age,null);
-  await api('/profile','PATCH',{interests:['animals','ecology']});
+  await api('/profile','PATCH',{interests:['animals','ecology'],volunteerExperience:'first_time'});
   let initial=await api('/bootstrap');
   const catalogCount=initial.catalog.length;
   assert.ok(catalogCount>=6,`Expected at least 6 calibration previews, got ${catalogCount}`);

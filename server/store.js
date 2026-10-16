@@ -33,6 +33,19 @@ export function createStore(pool) {
   return {
     pool,
 
+    async browserSession(tokenHash) {
+      const result = await pool.query('select user_id from browser_sessions where token_hash=$1 and expires_at > now()', [tokenHash]);
+      return result.rows[0]?.user_id || null;
+    },
+
+    async createBrowserSession(tokenHash, userId, seconds) {
+      await pool.query("insert into browser_sessions(token_hash,user_id,expires_at) values($1,$2,now()+$3::integer*interval '1 second')", [tokenHash,userId,seconds]);
+    },
+
+    async expireBrowserSessions() {
+      await pool.query('delete from browser_sessions where expires_at <= now()');
+    },
+
     async user(id) {
       const result = await pool.query("select id, name, data, name_ciphertext, data_ciphertext, garden_intro_seen, location_prompt_seen from app_users where id = $1", [id]);
       const row = result.rows[0];
@@ -280,6 +293,13 @@ export function createStore(pool) {
 
     async plans() {
       const result = await pool.query(`${planSelect} group by p.id order by p.created_at desc`);
+      return result.rows.map(planProjection);
+    },
+
+    async plansForUser(id) {
+      const result = await pool.query(`${planSelect} where p.owner_id=$1 or exists
+        (select 1 from plan_members membership where membership.plan_id=p.id and membership.user_id=$1)
+        group by p.id order by p.created_at desc`, [id]);
       return result.rows.map(planProjection);
     },
 

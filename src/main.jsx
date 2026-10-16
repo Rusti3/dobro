@@ -35,6 +35,7 @@ import DateRangePicker from './DateRangePicker.jsx';
 import { initialTab, launchPayload, launchEventId } from './launch.js';
 import { api, maxInitData } from './api.js';
 import { themeArtwork } from '../shared/theme-artwork.js';
+import './desktop.css';
 const mapRetryKey = "first-step-map-chunk-retry";
 const VolunteerMap = lazy(async () => {
   try {
@@ -76,11 +77,10 @@ function HelpiWordmark({ className = "" }) {
     <span className={`helpi-wordmark ${className}`.trim()}>хелпи</span>
   );
 }
-// MAX Bridge is injected by the MAX client. The app still renders in a normal
-// browser for demo mode, where this value is undefined.
+// The same application runs with MAX initData or its own browser session.
 const maxApp = window.WebApp;
 const startPayload = launchPayload({ bridgeStartParam: maxApp?.initDataUnsafe?.start_param, hash: location.hash, search: location.search });
-const initialEventId = launchEventId(startPayload);
+const initialEventId = launchEventId(startPayload) || (/^[a-zA-Z0-9_-]+$/.test(new URLSearchParams(location.search).get('event') || '') ? new URLSearchParams(location.search).get('event') : '');
 const categories = { all: "Всё добро", animals: "Животным", people: "Людям" };
 const themeMeta = {
   animals: ["🐶", "Животные", "Забота о тех, кто ждёт своего человека"],
@@ -351,6 +351,50 @@ function Card({ e, featured = false, onSelect }) {
       </button>
     );
   }
+function DesktopSidebar({ data, tab, settings, onGo, onSettings }) {
+  const activeCount = data.plans.filter(plan => !['done', 'cancelled'].includes(plan.status)).length;
+  const completed = gardenFor(data.plans, data.user.id).completed.length;
+  return <aside className="sidebar">
+    <button className="brand" aria-label="хелпи — на главную" onClick={() => onGo('home')}><HelpiWordmark/></button>
+    <p className="sidebar-caption">Добрые дела, которые тебе близки</p>
+    <nav aria-label="Основная навигация">
+      {[["home", Compass, "Добрые дела"], ["map", MapIcon, "Карта"], ["profile", Sprout, "Мой сад"]].map(([id, Icon, label]) =>
+        <button key={id} className={`nav-item nav-${id}${tab === id && !settings ? ' active' : ''}`} aria-current={tab === id && !settings ? 'page' : undefined} onClick={() => onGo(id)}>
+          <Icon size={21}/><span>{label}</span>{id === 'profile' && activeCount > 0 && <span className="nav-count">{activeCount}</span>}
+        </button>)}
+    </nav>
+    <div className="sidebar-garden"><Sprout size={28}/><div><strong>{completed === 0 ? 'Начало твоего сада' : `Завершено дел: ${completed}`}</strong><p>{activeCount ? `В планах: ${activeCount}` : 'С каждым делом — больше зелени'}</p></div></div>
+    <button className={`profile-button${settings ? ' active' : ''}`} onClick={onSettings} aria-label="Настройки">
+      <UserAvatar className="avatar" name={data.user.name} photoUrl={data.maxProfile?.photoUrl}/>
+      <span>{data.user.name || 'Друг'}<small>{data.mode === 'browser' ? 'Профиль в этом браузере' : data.mode === 'demo' ? 'Демонстрационный профиль' : 'Твоё пространство'}</small></span><Settings size={18}/>
+    </button>
+  </aside>;
+}
+
+function FeedSection({ section, items, onSelect, onLocate }) {
+  const rail = useRef(null);
+  const [edges, setEdges] = useState({ start: true, end: true });
+  useEffect(() => {
+    const element = rail.current;
+    if (!element) return;
+    const update = () => setEdges({ start: element.scrollLeft < 4, end: element.scrollLeft + element.clientWidth >= element.scrollWidth - 4 });
+    update();
+    element.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => { element.removeEventListener('scroll', update); observer.disconnect(); };
+  }, [items.length]);
+  const title = section.id === 'daily' ? 'Для тебя' : section.title;
+  const move = direction => rail.current?.scrollBy({ left: direction * rail.current.clientWidth * .92, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  return <section className="feed-block">
+    <div className="section-head"><h2>{title}{section.id === 'taste' ? ' 🌱' : ''}</h2>
+      {items.length > 0 && <div className="feed-rail-controls"><button aria-label={`Назад: ${title}`} disabled={edges.start} onClick={() => move(-1)}><ArrowLeft size={18}/></button><button aria-label={`Вперёд: ${title}`} disabled={edges.end} onClick={() => move(1)}><ArrowRight size={18}/></button></div>}
+    </div>
+    {section.id === 'nearby' && !items.length && <div className="feed-empty"><MapPin size={26}/><p>{section.locationRequired ? section.subtitle : 'В пределах 10 км пока нет подходящих дел.'}</p>{section.locationRequired && <button className="secondary" onClick={onLocate}>Поделиться геопозицией</button>}</div>}
+    <div className="feed-rail" ref={rail}>{items.map(event => <Card key={event.id} e={event} onSelect={onSelect}/>)}</div>
+  </section>;
+}
+
 function CatalogFeed({recommendations,chosen,audienceFilter,difficultyFilter,dateFrom,dateTo,timeFilter,formatFilter,feedQuery,feedFiltersOpen,feedLimit,eventMatchesActiveFilters,setFeedQuery,setFeedLimit,setFeedFiltersOpen,setDifficultyFilter,setDateFrom,setDateTo,setTimeFilter,setFormatFilter,setAudienceFilter,cityCatalogById,onSelect,onLocate}) {
     const sections = recommendations.sections || [{ id: "all", title: "Для тебя", subtitle: "Актуальные дела", eventIds: chosen.slice(0, 6).map((event) => event.id) }];
     const activeFilterCount = [audienceFilter, difficultyFilter, dateFrom || dateTo, timeFilter, formatFilter, feedQuery.trim()].filter(Boolean).length;
@@ -359,6 +403,7 @@ function CatalogFeed({recommendations,chosen,audienceFilter,difficultyFilter,dat
     const moreEvents = activeFilterCount ? filteredEvents : chosen.filter((event) => !recommendedIds.has(event.id));
     const visibleEvents = moreEvents.slice(0, feedLimit);
     return <section className="daily-feed">
+      <header className="feed-heading"><span className="eyebrow">ТВОЙ ВКЛАД НАЧИНАЕТСЯ ЗДЕСЬ</span><h1>Найди своё доброе дело</h1><p>Помощь рядом, любимые темы и новые возможности.</p></header>
       <section className="feed-filtering" aria-label="Фильтры добрых дел">
         <div className="feed-search-row">
           <label className="feed-search"><Search size={17}/><input value={feedQuery} onChange={(event) => { setFeedQuery(event.target.value); setFeedLimit(12); }} placeholder="Найти дело" aria-label="Поиск по добрым делам"/></label>
@@ -381,11 +426,7 @@ function CatalogFeed({recommendations,chosen,audienceFilter,difficultyFilter,dat
           const items = section.eventIds.map((id) => cityCatalogById.get(id)).filter(Boolean);
           if (section.hidden) return null;
           if (!items.length && section.id !== "nearby") return null;
-          return <section className="feed-block" key={section.id}>
-            <div className="section-head"><h2>{section.id === "daily" ? "Для тебя" : section.title}{section.id === "taste" ? " 🌱" : ""}</h2></div>
-            {section.id === "nearby" && !items.length && <div className="feed-empty"><p>{section.locationRequired ? section.subtitle : "В пределах 10 км пока нет подходящих дел."}</p>{section.locationRequired && <button className="secondary" onClick={onLocate}>Поделиться геопозицией</button>}</div>}
-            <div className="feed-rail">{items.map((event) => <Card key={event.id} e={event} onSelect={onSelect}/>)}</div>
-          </section>;
+          return <FeedSection key={section.id} section={section} items={items} onSelect={onSelect} onLocate={onLocate}/>;
         })}
       </div>}
       {moreEvents.length > 0 && <section className="infinite-events">
@@ -498,7 +539,7 @@ function App() {
       setProfile(d.user.profile);
       setInterestSelection(d.user.profile.interests || []);
       setOnboard(d.recommendations?.stage === "interests" && ((!inviteCode && !initialEventId) || allowOnboarding));
-      setRegistrationName(d.user.name === "Друг" ? d.maxProfile?.firstName || "" : d.user.name || "");
+      setRegistrationName(d.user.name === "Друг" ? d.maxProfile?.firstName || (d.mode === 'browser' ? 'Друг' : '') : d.user.name || "");
       setRegistrationAge(d.user.profile?.age ? String(d.user.profile.age) : "");
       setFatal("");
     } catch (e) {
@@ -508,9 +549,10 @@ function App() {
   useEffect(() => {
     maxApp?.ready?.();
     maxApp?.expand?.();
-    load();
+    // Establish the cookie before deep-link requests to avoid creating two guest profiles.
+    load().then(async () => {
     if (initialEventId)
-      api("/events/" + encodeURIComponent(initialEventId))
+      await api("/events/" + encodeURIComponent(initialEventId))
         .then(event => {
           setDetail(event);
           setTab("home");
@@ -521,7 +563,7 @@ function App() {
           load(selectedCity, true);
         });
     if (inviteCode)
-      api("/invites/" + inviteCode)
+      await api("/invites/" + inviteCode)
         .then((result) => {
           if (!result.event) throw new Error("Дело из приглашения больше недоступно.");
           setInvite(result);
@@ -534,6 +576,7 @@ function App() {
           setToast(e.message, true);
           load(selectedCity, true);
         });
+    });
   }, []);
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -567,6 +610,18 @@ function App() {
     const t = setTimeout(() => setToast(""), 4500);
     return () => clearTimeout(t);
   }, [toast]);
+  useEffect(() => {
+    if (data?.recommendations?.stage !== 'calibration' || detail || settings) return;
+    const choose = event => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.repeat || /^(INPUT|TEXTAREA|BUTTON|SELECT)$/.test(event.target.tagName)) return;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        sendFeedback(event.key === 'ArrowRight' ? 'like' : 'skip');
+      }
+    };
+    window.addEventListener('keydown', choose);
+    return () => window.removeEventListener('keydown', choose);
+  }, [data?.recommendations?.stage, data?.recommendations?.completed, detail, settings, busy]);
   useEffect(() => {
     const back = () => {
       if (selectedPlanId && !detail) { setSelectedPlanId(null); return; }
@@ -680,8 +735,21 @@ function App() {
     }
   }
   async function sharePlanInMax(planId, eventId = null) {
-    if (!maxInitData() || typeof maxApp?.shareMaxContent !== 'function')
-      throw new Error('Приглашение с картинкой можно отправить из мини-приложения в MAX.');
+    if (!maxInitData()) {
+      const { code } = await api(`/plans/${planId}/invite`, 'POST', {});
+      const link = new URL('/', window.location.origin);
+      link.searchParams.set('invite', code);
+      const event = data.plans.find(plan => plan.id === planId)?.event || data.catalog.find(item => item.id === eventId);
+      const invitation = { title: event?.short || 'Пойдём на доброе дело', text: `${data.user.name === 'Друг' ? 'Пойдём вместе' : data.user.name + ' зовёт тебя'}: ${event?.short || 'доброе дело'}`, url: link.href };
+      if (navigator.share) {
+        try { await navigator.share(invitation); } catch (error) { if (error.name !== 'AbortError') throw error; }
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link.href);
+        setToast('Ссылка-приглашение скопирована. Отправь её другу.');
+      } else throw new Error('Браузер не поддерживает отправку приглашений. Попробуй открыть сайт в другом браузере.');
+      return;
+    }
+    if (typeof maxApp?.shareMaxContent !== 'function') throw new Error('Обнови MAX, чтобы отправить приглашение с картинкой.');
     let prepared = pendingInviteShare.current;
     if (prepared?.planId !== planId) {
       const { mid, chatType } = await api(`/plans/${planId}/invite`, "POST", { shareInMax: true });
@@ -697,8 +765,6 @@ function App() {
   }
   async function inviteFromEvent(e) {
     await act(async () => {
-      if (!maxInitData() || typeof maxApp?.shareMaxContent !== 'function')
-        throw new Error('Приглашение с картинкой можно отправить из мини-приложения в MAX.');
       if (pendingInviteShare.current?.eventId === e.id) {
         await sharePlanInMax(pendingInviteShare.current.planId, e.id);
         return;
@@ -735,7 +801,7 @@ function App() {
         <Sprout size={48} />
         <h1>Не получилось загрузить</h1>
         <p>{fatal}</p>
-        <button onClick={load} className="primary">
+        <button onClick={() => load()} className="primary">
           <RefreshCw size={18} /> Попробовать снова
         </button>
       </main>
@@ -1287,7 +1353,7 @@ function App() {
             </div>
             <CityPicker />
           </div>
-          <hr />
+          {data.mode !== 'browser' && <><hr />
           <h3>Ежедневная подборка</h3>
           <p>
             Рекомендованные дела приходят утром в MAX. Можно отключить здесь или командой /stop в боте.
@@ -1303,8 +1369,10 @@ function App() {
             />
             Присылать рекомендации в MAX
           </label>
+          </>}
           <hr />
           <h3>Твои данные</h3>
+          {data.mode === 'browser' && <p className="browser-profile-note">Профиль сохраняется в этом браузере. На другом устройстве можно начать свой.</p>}
           <form className="personal-form" onSubmit={(event) => event.preventDefault()} onBlur={(event) => {
             if (event.currentTarget.contains(event.relatedTarget)) return;
             if (registrationName.trim() === data.user.name && registrationAgeNumber === Number(profile.age)) return;
@@ -1413,7 +1481,7 @@ function App() {
               </div>
             </dl>
             <div className="detail-action">
-              {invite && !invite.joined && <p className="detail-invite-privacy">После принятия приглашения другу будет видно твоё имя в MAX.</p>}
+            {invite && !invite.joined && <p className="detail-invite-privacy">После принятия приглашения другу будет видно твоё имя.</p>}
               <div className="detail-action-buttons">
                 {invite && <button className="primary" disabled={busy} onClick={() => act(async () => {
                   if (!invite.joined) {
@@ -1460,63 +1528,25 @@ function App() {
     }} onUpdatePlan={update} onInvitePlan={inviteFriend} busy={busy}/>;
   else content = <CatalogFeed recommendations={recommendations} chosen={chosen} audienceFilter={audienceFilter} difficultyFilter={difficultyFilter} dateFrom={dateFrom} dateTo={dateTo} timeFilter={timeFilter} formatFilter={formatFilter} feedQuery={feedQuery} feedFiltersOpen={feedFiltersOpen} feedLimit={feedLimit} eventMatchesActiveFilters={eventMatchesActiveFilters} setFeedQuery={setFeedQuery} setFeedLimit={setFeedLimit} setFeedFiltersOpen={setFeedFiltersOpen} setDifficultyFilter={setDifficultyFilter} setDateFrom={setDateFrom} setDateTo={setDateTo} setTimeFilter={setTimeFilter} setFormatFilter={setFormatFilter} setAudienceFilter={setAudienceFilter} cityCatalogById={cityCatalogById} onSelect={openDetail} onLocate={shareLocationFromFeed} />;
   const cleanScreen = !detail && !selectedPlanId && !onboard && !settings;
+  const openSettings = () => { setSettings(true); closeDetail(); setOnboard(false); };
+  const desktopSidebar = <DesktopSidebar data={data} tab={tab} settings={settings} onGo={go} onSettings={openSettings}/>;
   if (tab === "profile" && cleanScreen)
-    return <div className="profile-garden-shell">{content}<BottomNav garden /></div>;
+    return <div className="full-view-shell">{desktopSidebar}<div className="profile-garden-shell">{content}<button className="scene-settings" aria-label="Настройки" onClick={openSettings}><Settings size={20}/></button><BottomNav garden /></div></div>;
   if (tab === "map" && cleanScreen)
-    return <div className="map-only-shell"><MapErrorBoundary><Suspense fallback={<div className="map-loading">Открываем карту…</div>}><VolunteerMap key={selectedCity} events={mapEvents} center={selectedCityOption.center} botUsername={data.botUsername} userName={data.user.name} userPhotoUrl={data.maxProfile?.photoUrl} onSelect={openDetail}/></Suspense></MapErrorBoundary><BottomNav garden /></div>;
+    return <div className="full-view-shell">{desktopSidebar}<div className="map-only-shell"><MapErrorBoundary><Suspense fallback={<div className="map-loading">Открываем карту…</div>}><VolunteerMap key={selectedCity} events={mapEvents} center={selectedCityOption.center} botUsername={data.botUsername} userName={data.user.name} userPhotoUrl={data.maxProfile?.photoUrl} onSelect={openDetail}/></Suspense></MapErrorBoundary><BottomNav garden /></div></div>;
   if ((onboard || experiencePrompt) && !detail && !settings)
     return <div className="interest-only-shell">{content}{toast && <div className={`toast${toastError ? ' toast-error' : ''}`} role={toastError ? 'alert' : 'status'}>{toastError ? <X size={18}/> : <Check size={18}/>}<span>{toast}</span><button aria-label="Закрыть уведомление" onClick={() => setToast("")}><X size={20}/></button></div>}</div>;
   if (tab === "home" && cleanScreen && recommendations.stage === "calibration")
     return <div className="swipe-only-shell">{renderSwipeExperience()}{toast && <div className={`toast${toastError ? ' toast-error' : ''}`} role={toastError ? 'alert' : 'status'}>{toastError ? <X size={18}/> : <Check size={18}/>}<span>{toast}</span><button aria-label="Закрыть уведомление" onClick={() => setToast("")}><X size={20}/></button></div>}</div>;
   return (
     <div className={`app${detail ? ' showing-detail' : ''}${settings ? ' showing-settings' : ''}`}>
-      <aside className="sidebar">
-        <button className="brand" aria-label="хелпи — на главную" onClick={() => go("home")}>
-          <HelpiWordmark />
-        </button>
-        <nav aria-label="Основная навигация">
-          {nav.map(([id, I, label]) => (
-            <button
-              className={
-                tab === id && !detail && !onboard && !settings
-                  ? "nav-item active"
-                  : "nav-item"
-              }
-              key={id}
-              onClick={() => go(id)}
-            >
-              <I size={20} />
-              {label}
-              {id === "profile" && active.length > 0 && (
-                <span className="nav-count">{active.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <button
-          className="profile-button"
-          onClick={() => {
-            setSettings(true);
-            closeDetail();
-            setOnboard(false);
-          }}
-        >
-          <UserAvatar className="avatar" name={data.user.name} photoUrl={data.maxProfile?.photoUrl}/>
-          <span>
-            {data.mode === "demo" ? "Гость" : data.user.name}
-            <small>
-              {data.mode === "demo"
-                ? "Локальный деморежим"
-                : "Моё пространство"}
-            </small>
-          </span>
-          <Settings size={17} />
-        </button>
-      </aside>
+      {desktopSidebar}
       <div className="workspace">
         <header className="topbar">
           <button type="button" className="mobile-brand" aria-label="хелпи — на главную" onClick={() => go("home")}><HelpiWordmark /></button>
+          <div className="desktop-page-context"><Sprout size={18}/><span>{settings ? 'Настройки' : detail ? 'Карточка дела' : selectedPlanId ? 'Личный план' : 'Добрые дела'}</span></div>
           <div className="topbar-actions">
+            {!settings && <div className="desktop-city"><CityPicker/></div>}
             <button
               className="top-settings"
               aria-label="Настройки"
