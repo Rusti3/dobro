@@ -209,8 +209,13 @@ const server = http.createServer(async (req, res) => {
         file !== path.join(root, "dist")
       )
         fail("Не найдено.", 404);
-      if (!fs.existsSync(file) || fs.statSync(file).isDirectory())
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        // A missing fingerprinted asset must not fall through to index.html.
+        // Otherwise browsers receive HTML with a 200/JavaScript MIME type and
+        // keep showing the app's startup error until their cached page expires.
+        if (url.pathname.startsWith('/assets/')) fail('Файл приложения не найден.', 404);
         file = path.join(root, "dist/index.html");
+      }
       if (!fs.existsSync(file)) fail("Сначала выполните npm run build.", 503);
       const types = {
         ".html": "text/html; charset=utf-8",
